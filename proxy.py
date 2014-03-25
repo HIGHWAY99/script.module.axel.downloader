@@ -49,7 +49,7 @@ class MyHandler(BaseHTTPRequestHandler):
            
     #Handles a HEAD request
     def do_HEAD(self):
-        # Only send the head
+        # Only send the head #we should forward this
         print "HEAD request"
 
     #Handles a GET request.
@@ -107,117 +107,97 @@ class MyHandler(BaseHTTPRequestHandler):
         if cached:
             (file_size, file_name,downloader) = cached
         else:
-            file_size=int(self.get_file_size(file_url))
+            file_size,file_url=self.get_file_size(file_url)# get the url again, incase there is a redirector
+            file_size=int(file_size)
             self.save_to_cache(file_name, (file_size, file_name,downloader))
 
-        (hrange, crange,torange) = self.get_range_request(s_range, file_size)
+        (srange, erange) = self.get_range_request(s_range, file_size)
         
-        print 'REQUESTING %s and %s' % (hrange, crange)
+        print 'REQUESTING from %s to %s, srange=%s' % (str(srange), str(erange),s_range)
         
-		
-		
-        # Do we have to send a normal response or a range response?
-        if s_range:
-            self.send_response(206)
-            self.send_header("Content-Range",crange)
-        else:
-            #Send back 200 reponse - OK
-            self.send_response(200)
+
 
         #Set response type values
         rtype="application/x-msvideo"
         etag=self.generate_ETag(file_url)
 
-        content_size= file_size - hrange
+        content_size= file_size
         
-        #Send http response headers
-        #Send the video file
-        videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, hrange,torange,downloader)
-		content_size=len(videoContents);
-		self.send_http_headers(file_name, rtype, content_size , etag)
-		self.send_video_content(file_name, videoContents)
-		
+        # Do we have to send a normal response or a range response?
+        if s_range:
+            self.send_response(206)
+            videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, srange,torange,downloader)
+            portionLen=len(videoContents); #could be less than asked by xbmc
+            crange="bytes "+str(srange)+"-" +str(int(srange+portionLen)-1)+"/"+str(content_size)#recalculate crange based on srange, portionLen and content_size 
+            self.send_header("Content-Range",crange)
+            content_size=portionLen; #we are sending a portion so send correct info
+        else:
+            #Send back 200 reponse - OK
+            self.send_response(200)
+
+        self.send_http_headers(file_name, rtype, content_size , etag)
+
+        if len(videoContents)>0:
+            self.send_video_content(self.wfile, videoContents)
+
 
     def send_video_content(self,file_out, videoData):
-		try:
-			file_out.write(videoData);
-			file_out.flush();
-			out_fd.close();
+        try:
+            file_out.write(videoData);
+            file_out.flush();
+            out_fd.close();
         except Exception, e:
-            print 'Exception sending file: %s' % e
+            print 'Exception sending video porting: %s' % e
             pass
 
-    def get_video_portion(self, file_out, file_link, file_dest, file_name, start_byte, downloader):
+    def get_video_portion(self, file_out, file_link, file_dest, file_name, start_byte, end_byte, downloader):
         print 'Starting download at byte: %d' % start_byte
         
         full_path = os.path.join(common.profile_path, file_name)
-		initalDownload=False
-		if not downloader:
-			initalDownload=True
-			import axel
-			downloader = axel.AxelDownloader()
-			dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
-			dt.start()
-			time.sleep(10)# sleep till we get some data
-			
-		else:
-			if not downloader.completed:
-				downloader.repriotizeQueue(start_byte)
+        MAX_RETURN_LENGTH=1024*1024*5; #5 meg
+        if not downloader:
+            import axel
+            downloader = axel.AxelDownloader() # store in the same variable
+            dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
+            dt.start()
+            time.sleep(10)# sleep till we get some data
+        else:
+            if not downloader.completed:
+                totalBytes=downloader.bytesDownloadedFrom(start_byte):
+                if totalBytes<MAX_RETURN_LENGTH: #get it to download more
+                    downloader.repriotizeQueue(start_byte)#reset the priority
+                    time.sleep(10)# sleep till we get some data
+
 
         fileContents=None
         try:
             #Opening file
 
-			dataDownloaded=downloadedPortionIfAny(start_byte,full_path)
-            if len(dataDownloaded)==0:
-				time.sleep(10)# sleep till we get some data
-				dataDownloaded=downloadedPortionIfAny(start_byte,full_path)#read in 1 meg byte steps, stop when either read enough, end of file or the spot is empty.
+            if start_byte-end_byte>MAX_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
+                end_byte = start_byte+MAX_LENGTH;  
 
+            
+            dataDownloaded=downloader.getDownloadedPortion(start_byte,end_byte)
+            if len(dataDownloaded)==0:#no data yet?
+                time.sleep(10)# sleep till we get some data
+                dataDownloaded=getDownloadedPortion(start_byte,end_byte)
 
-            print 'FILE DEST: %s' % full_path
-            #out_fd = open(full_path, "rb")
-            #out_fd.seek(start_byte)
-            fileContents=dataDownloaded#out_fd.read(sizeOfAlreadyDownloadedPortion)
-            #file_out.flush()
-            #out_fd.close()
+            #error checking here, if after 20 seconds we are not getting anything, means dataDownloaded is 0
+
+            print 'content found: %d' % len(dataDownloaded)
+            fileContents=dataDownloaded
         except Exception, e:
             print 'Exception sending file: %s' % e
             pass
-		return fileContents;
-		
-    def downloadedPortionIfAny(self, start_byte, full_path,chunkSize, fileSize)
-		out_fd = open(full_path, "rb")
-		positionToRead=start_byte
-		filesizeToRead= fileSize-start_byte;
-		dataToReturn=""
-		stopReading=false
-		while (not stopReading)
-
-			dataSize=chunkSize;
-			if (fileSize-positionToRead)<chunkSize: 
-				dataSize=fileSize-positionToRead
-
-			out_fd.seek(positionToRead)
-			currentPortion=out_fd.read(dataSize);
-			if len(currentPortion)>0:
-				if validVideoBlock(currentPortion)
-					dataToReturn+=currentPortion
-				else:
-					stopReading=True
-			else:
-				stopReading=True
-			positionToRead+=len(currentPortion)+1
-			if positionToRead>=fileSize:
-				stopReading=True
-		out_fd.close();
-		return dataToReturn
+        return fileContents;
 
 
-    def get_file_size(self, url):
+
+    def get_file_size(self, url): #check the redirector here and update the url if needed
         request = urllib2.Request(url, None, http_headers)
         data = urllib2.urlopen(request)
         content_length = data.info()['Content-Length']
-        return content_length
+        return content_length,url
 
 
     #Set and reply back standard set of headers including file information
@@ -249,20 +229,24 @@ class MyHandler(BaseHTTPRequestHandler):
 
     def get_range_request(self, hrange, file_size):
         if hrange==None:	
-            hrange=0
-            crange=None
+            srange=0
+            erange=None
         else:
             try:
                 #Get the byte value from the request string.
                 hrange=str(hrange)
-                hrange=int(hrange.split("=")[1].split("-")[0])
+                splitRange=hrange.split("=")[1].split("-")
+                srange=int(splitRange[0])
+                erange = splitRange[1]
+                if erange="":
+                    erange=file_size-1
                 #Build range string
-                crange="bytes "+str(hrange)+"-" +str(int(file_size)-1)+"/"+str(file_size)
+                
             except:
                 # Failure to build range string? Create a 0- range.
-                hrange=0
-                crange="bytes 0-"
-        return (hrange, crange)
+                srange=0
+                erange=file_size-1;
+        return (srange, erange)
 
 
     def decode_B64_url(self, b64):

@@ -38,8 +38,10 @@ import common
 #Create queue objects
 workQ = Queue.PriorityQueue()
 resultQ = Queue.PriorityQueue()
-currentThread=[]
-        
+currentThreads=[]
+completedWork=[]
+isAllowed = multiprocessing.Condition()
+stopEveryone=False;        
 class AxelDownloader:
 
     '''
@@ -70,16 +72,73 @@ class AxelDownloader:
             'Accept-Language': 'en-us,en;q=0.5',
         }
         self.completed=False
+        self.fileFullPath=""; #init with blank
         common.addon.log('Axel Downloader Intitialized')
 
+    def bytesDownloadedFrom(self, start_byte, stopAt): #tell us how many bytes are downloaded
+        sIndex=-1;
+        for i, item in enumerate(completedWork):
+            if start_byte>=item[1] and start_byte<=(item[1]+item[1]-1):
+                sIndex= i
+                break;
+        if sIndex==-1: return 0;#not downloaded yet
+        eIndex= completedWork[sIndex][1]+completedWork[sIndex][2]-1;
+        for i=sIndex+1;i<len(completedWork);i++ :  #forward till we find a gap or it ends
+            if completedWork[i][1]-1=eIndex: #if new chunk is joint with previous one
+                eIndex+=completedWork[i][2]
+            else:
+                break;
+            if eIndex>=stopAt:
+                eIndex=stopAt;
+                break;
+        return eIndex;
 
-	def resetDownloadPriority(long startingByte)
-		StopFreeAllrunningthreads;
-		getToTheQueue
-		reprioritizedFromStartingbyte
+    def getDownloadedPortion(self, start_byte,end_byte): #return whatever is downloaded so far starting from start_byte
 
-	def stop()
-		StopFreeAllrunningthreads;
+        downloadBytes=self.bytesDownloadedFrom(start_byte);
+        if downloadBytes==0: return "";
+        if (end_byte-start_byte+1)>=downloadBytes
+            end_byte=start_byte+downloadBytes;
+
+        out_fd = open(self.fileFullPath, "rb")
+        positionToRead=start_byte
+        filesizeToRead= start_byte-end_byte+1;
+        dataToReturn=""
+        out_fd.seek(positionToRead)
+        dataToReturn=out_fd.read(filesizeToRead)
+        out_fd.close();
+        return dataToReturn
+        #read from file, from sIndex to eIndex
+    
+    def repriotizeQueue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
+        stopEveryone=True
+        isAllowed.acquire();#freeze everyone
+        currentQueue=[];
+        while (not Queue.empty())  #clear the queue
+            currentQueue.append(workQ.get())
+        currentQueue=sorted(currentQueue);# sort on block number as we could be in any sequence due to seek
+        sIndex=-1
+        for i, item in enumerate(currentQueue):
+            if startingByte>=item[1] and startingByte<=(item[1]+item[1]-1):
+                sIndex= i
+                break;
+        
+        if not sIndex=-1: #error here !
+            newQueue=[]
+            for i=0;i<len(currentQueue);i++
+                currentQueue[sIndex][0]=i; #new priority
+                newQueue.append(currentQueue[sIndex])
+                sIndex+=1;
+                if sIndex>len(currentQueue)-1: sIndex=0;#if reached end then start from beginning
+            
+            for i, item in enumerate(newQueue):
+                workQ.put(item)# recreate new queue in different order
+        stopEveryone=False
+        isAllowed.release(); #start downloading again but in different priority
+
+
+    def stop()
+        StopFreeAllrunningthreads;
 
 
     def __get_file_size(self, url):
@@ -112,7 +171,6 @@ class AxelDownloader:
         '''
 
         while True:
-        	
             try:
   
                 #Grab items from queue to process
@@ -127,6 +185,7 @@ class AxelDownloader:
     
                 #Tell queue that this task is done
                 resultQ.task_done()
+                completedWork.append ([block_num, start_block, chunk_block])
 
             except Exception, e:
                 common.addon.log_error('Failed writing block #%d :'  % (block_num, e))        
@@ -200,11 +259,13 @@ class AxelDownloader:
         part_file = out_file + ".part"
         out_fd = os.open(out_file, os.O_CREAT | os.O_WRONLY)
         os.close(out_fd)
-               
+        self.fileFullPath=out_file
+        
+        isAllowed.acquire();
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
             t = Downloader()
-			currentThread[i]=t
+            currentThread.append(t)
             t.start()
         common.addon.log('Worker threads initialized', 2)
         
@@ -217,16 +278,16 @@ class AxelDownloader:
         
         #Build workQ items
         self.__build_workq(file_link)
-        
+        isAllowed.release()
         common.addon.log('Worker Queue Built', 2) 
           
         # Wait for the queues to finish - join to close all threads when done
-        workQ.join()
+        workQ.join()#timeout
         common.addon.log('Worker Queue successfully joined', 2)
         resultQ.join()
         common.addon.log('Result Queue successfully joined', 2)
         self.completed=True
-		stopAllThreads;
+        #stopAllThreads; todo
         #Rename file from .part to intended name
         #os.rename(part_file, out_file)
 
@@ -258,7 +319,9 @@ class Downloader(threading.Thread):
         '''
         
         while True:
-            block_num, url, start, length = workQ.get()
+            isAllowed.acquire();
+            block_num, url, start, length = workQ.get() ##put a time out here
+            cond.release();
             common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             #Download the file
@@ -308,6 +371,7 @@ class Downloader(threading.Thread):
             return None
         request.add_header('Range', 'bytes=%d-%d' % (start, start + length))
 
+        if stopEveryone: return;
         #TO-DO: Add more url type error checks
         while 1:
             try:
@@ -325,6 +389,7 @@ class Downloader(threading.Thread):
         #Read data blocks in specific size 1 at a time until we have the full chunk_block size
         while remaining_blocks > 0:
 
+            if stopEveryone: return;
             if remaining_blocks >= self.block_size:
                 fetch_size = self.block_size
             else:
