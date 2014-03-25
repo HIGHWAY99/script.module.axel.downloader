@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="plugin.video.axel.tester" version="0.1.0" name="axel downloader tester" provider-name="Eldorado">
+    <requires>
+        <import addon="xbmc.python" version="2.1.0"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary>Test Addon for axel</summary>
+        <description></description>
+        <platform>all</platform>
+    </extension>
+</addon>

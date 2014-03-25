@@ -103,12 +103,16 @@ class MyHandler(BaseHTTPRequestHandler):
         file_dest = common.profile_path
         
         cached = self.get_from_cache(file_name)
-        downloader=None:
+        downloader=None
         if cached:
             (file_size, file_name,downloader) = cached
+            print ' got it from cache'
         else:
+            print ' NOE create it'
             file_size,file_url=self.get_file_size(file_url)# get the url again, incase there is a redirector
             file_size=int(file_size)
+            import axel
+            downloader = axel.AxelDownloader() # store in the same variable
             self.save_to_cache(file_name, (file_size, file_name,downloader))
 
         (srange, erange) = self.get_range_request(s_range, file_size)
@@ -122,11 +126,11 @@ class MyHandler(BaseHTTPRequestHandler):
         etag=self.generate_ETag(file_url)
 
         content_size= file_size
-        
+        videoContents=""
         # Do we have to send a normal response or a range response?
-        if s_range:
+        if s_range and not s_range=="bytes=0-0":
             self.send_response(206)
-            videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, srange,torange,downloader)
+            videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, srange,erange,downloader)
             portionLen=len(videoContents); #could be less than asked by xbmc
             crange="bytes "+str(srange)+"-" +str(int(srange+portionLen)-1)+"/"+str(content_size)#recalculate crange based on srange, portionLen and content_size 
             self.send_header("Content-Range",crange)
@@ -145,7 +149,7 @@ class MyHandler(BaseHTTPRequestHandler):
         try:
             file_out.write(videoData);
             file_out.flush();
-            out_fd.close();
+            file_out.close();
         except Exception, e:
             print 'Exception sending video porting: %s' % e
             pass
@@ -155,33 +159,37 @@ class MyHandler(BaseHTTPRequestHandler):
         
         full_path = os.path.join(common.profile_path, file_name)
         MAX_RETURN_LENGTH=1024*1024*5; #5 meg
-        if not downloader:
-            import axel
-            downloader = axel.AxelDownloader() # store in the same variable
+        if not downloader.started:
+            #import axel
+            #downloader = axel.AxelDownloader() # store in the same variable
+            print 'Starting downloader 0 '
             dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
+            print 'Starting downloader '
             dt.start()
             time.sleep(10)# sleep till we get some data
         else:
             if not downloader.completed:
-                totalBytes=downloader.bytesDownloadedFrom(start_byte):
+                totalBytes=downloader.bytesDownloadedFrom(start_byte,start_byte+MAX_RETURN_LENGTH)
                 if totalBytes<MAX_RETURN_LENGTH: #get it to download more
                     downloader.repriotizeQueue(start_byte)#reset the priority
                     time.sleep(10)# sleep till we get some data
 
 
-        fileContents=None
+        fileContents=""
         try:
             #Opening file
+            print 'now checking'
+            if start_byte-end_byte>MAX_RETURN_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
+                end_byte = start_byte+MAX_RETURN_LENGTH;  
 
-            if start_byte-end_byte>MAX_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
-                end_byte = start_byte+MAX_LENGTH;  
-
-            
+            print 'start and endbyte', start_byte,end_byte
+            print 'getting downloadedPortion'
             dataDownloaded=downloader.getDownloadedPortion(start_byte,end_byte)
+            print 'getting downloadedPortion end'
             if len(dataDownloaded)==0:#no data yet?
                 time.sleep(10)# sleep till we get some data
-                dataDownloaded=getDownloadedPortion(start_byte,end_byte)
-
+                dataDownloaded=downloader.getDownloadedPortion(start_byte,end_byte)
+            print 'slep again downloadedPortion end'
             #error checking here, if after 20 seconds we are not getting anything, means dataDownloaded is 0
 
             print 'content found: %d' % len(dataDownloaded)
@@ -228,7 +236,7 @@ class MyHandler(BaseHTTPRequestHandler):
 
 
     def get_range_request(self, hrange, file_size):
-        if hrange==None:	
+        if hrange==None:
             srange=0
             erange=None
         else:
@@ -238,14 +246,14 @@ class MyHandler(BaseHTTPRequestHandler):
                 splitRange=hrange.split("=")[1].split("-")
                 srange=int(splitRange[0])
                 erange = splitRange[1]
-                if erange="":
-                    erange=file_size-1
+                if erange=="":
+                    erange=int(file_size-1)
                 #Build range string
                 
             except:
                 # Failure to build range string? Create a 0- range.
                 srange=0
-                erange=file_size-1;
+                erange=int(file_size-1);
         return (srange, erange)
 
 
@@ -299,6 +307,7 @@ PORT_NUMBER = 64653
 #Init file_cache - stores file information for repeat requests
 global file_cache
 file_cache={}
+print "AxelProxy Downloader getting Ready"
 
 if __name__ == '__main__':  
     socket.setdefaulttimeout(10)
