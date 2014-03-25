@@ -38,6 +38,7 @@ import common
 #Create queue objects
 workQ = Queue.PriorityQueue()
 resultQ = Queue.PriorityQueue()
+currentThread=[]
         
 class AxelDownloader:
 
@@ -68,8 +69,17 @@ class AxelDownloader:
                 'text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
             'Accept-Language': 'en-us,en;q=0.5',
         }
-        
+        self.completed=False
         common.addon.log('Axel Downloader Intitialized')
+
+
+	def resetDownloadPriority(long startingByte)
+		StopFreeAllrunningthreads;
+		getToTheQueue
+		reprioritizedFromStartingbyte
+
+	def stop()
+		StopFreeAllrunningthreads;
 
 
     def __get_file_size(self, url):
@@ -168,7 +178,7 @@ class AxelDownloader:
             i += 1
     
 
-    def download(self, file_link, file_dest='', file_name=''):
+    def download(self, file_link, file_dest='', file_name='',start_byte=0):
         '''
         Main function to perform download
               
@@ -194,6 +204,7 @@ class AxelDownloader:
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
             t = Downloader()
+			currentThread[i]=t
             t.start()
         common.addon.log('Worker threads initialized', 2)
         
@@ -214,7 +225,8 @@ class AxelDownloader:
         common.addon.log('Worker Queue successfully joined', 2)
         resultQ.join()
         common.addon.log('Result Queue successfully joined', 2)
-        
+        self.completed=True
+		stopAllThreads;
         #Rename file from .part to intended name
         #os.rename(part_file, out_file)
 
@@ -238,6 +250,7 @@ class Downloader(threading.Thread):
             'Accept-Language': 'en-us,en;q=0.5',
         }
         self.block_size = 1024
+
 
     def run(self):
         '''

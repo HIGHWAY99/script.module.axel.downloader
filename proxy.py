@@ -103,16 +103,19 @@ class MyHandler(BaseHTTPRequestHandler):
         file_dest = common.profile_path
         
         cached = self.get_from_cache(file_name)
+        downloader=None:
         if cached:
-            (file_size, file_name) = cached
+            (file_size, file_name,downloader) = cached
         else:
             file_size=int(self.get_file_size(file_url))
-            self.save_to_cache(file_name, (file_size, file_name))
+            self.save_to_cache(file_name, (file_size, file_name,downloader))
 
-        (hrange, crange) = self.get_range_request(s_range, file_size)
+        (hrange, crange,torange) = self.get_range_request(s_range, file_size)
         
         print 'REQUESTING %s and %s' % (hrange, crange)
         
+		
+		
         # Do we have to send a normal response or a range response?
         if s_range:
             self.send_response(206)
@@ -128,39 +131,87 @@ class MyHandler(BaseHTTPRequestHandler):
         content_size= file_size - hrange
         
         #Send http response headers
-        self.send_http_headers(file_name, rtype, content_size , etag)
-
         #Send the video file
-        self.send_video(self.wfile, file_url, file_dest, file_name, hrange)
+        videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, hrange,torange,downloader)
+		content_size=len(videoContents);
+		self.send_http_headers(file_name, rtype, content_size , etag)
+		self.send_video_content(file_name, videoContents)
+		
 
-
-    def send_video(self, file_out, file_link, file_dest, file_name, start_byte):
-        print 'Starting download at byte: %d' % start_byte
-        
-        full_path = os.path.join(common.profile_path, file_name)
-        
-        import axel
-        axel = axel.AxelDownloader()
-
-        
-        dt = threading.Thread(target=axel.download, args = (file_link, file_dest, file_name))
-        dt.start()
-        
-        try:
-            #Opening file
-            
-            time.sleep(10)
-
-            print 'FILE DEST: %s' % full_path
-            out_fd = open(full_path, "rb")
-            out_fd.seek(start_byte)
-            file_out.write(out_fd.read())
-            file_out.flush()
-            out_fd.close()
+    def send_video_content(self,file_out, videoData):
+		try:
+			file_out.write(videoData);
+			file_out.flush();
+			out_fd.close();
         except Exception, e:
             print 'Exception sending file: %s' % e
             pass
+
+    def get_video_portion(self, file_out, file_link, file_dest, file_name, start_byte, downloader):
+        print 'Starting download at byte: %d' % start_byte
         
+        full_path = os.path.join(common.profile_path, file_name)
+		initalDownload=False
+		if not downloader:
+			initalDownload=True
+			import axel
+			downloader = axel.AxelDownloader()
+			dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
+			dt.start()
+			time.sleep(10)# sleep till we get some data
+			
+		else:
+			if not downloader.completed:
+				downloader.repriotizeQueue(start_byte)
+
+        fileContents=None
+        try:
+            #Opening file
+
+			dataDownloaded=downloadedPortionIfAny(start_byte,full_path)
+            if len(dataDownloaded)==0:
+				time.sleep(10)# sleep till we get some data
+				dataDownloaded=downloadedPortionIfAny(start_byte,full_path)#read in 1 meg byte steps, stop when either read enough, end of file or the spot is empty.
+
+
+            print 'FILE DEST: %s' % full_path
+            #out_fd = open(full_path, "rb")
+            #out_fd.seek(start_byte)
+            fileContents=dataDownloaded#out_fd.read(sizeOfAlreadyDownloadedPortion)
+            #file_out.flush()
+            #out_fd.close()
+        except Exception, e:
+            print 'Exception sending file: %s' % e
+            pass
+		return fileContents;
+		
+    def downloadedPortionIfAny(self, start_byte, full_path,chunkSize, fileSize)
+		out_fd = open(full_path, "rb")
+		positionToRead=start_byte
+		filesizeToRead= fileSize-start_byte;
+		dataToReturn=""
+		stopReading=false
+		while (not stopReading)
+
+			dataSize=chunkSize;
+			if (fileSize-positionToRead)<chunkSize: 
+				dataSize=fileSize-positionToRead
+
+			out_fd.seek(positionToRead)
+			currentPortion=out_fd.read(dataSize);
+			if len(currentPortion)>0:
+				if validVideoBlock(currentPortion)
+					dataToReturn+=currentPortion
+				else:
+					stopReading=True
+			else:
+				stopReading=True
+			positionToRead+=len(currentPortion)+1
+			if positionToRead>=fileSize:
+				stopReading=True
+		out_fd.close();
+		return dataToReturn
+
 
     def get_file_size(self, url):
         request = urllib2.Request(url, None, http_headers)
