@@ -24,7 +24,7 @@ season = addon.queries.get('season', None)
 if mode == 'main':
           
     file_link ='http://download.wavetlan.com/SVV/Media/HTTP/H264/Other_Media/H264_test5_voice_mp4_480x360.mp4'
-
+    
     liz=xbmcgui.ListItem('Video')
     liz.setInfo( type="Video", infoLabels={ "Title": 'Video' } )
     u = sys.argv[0] + "?url=" + file_link + "&mode=play1"
@@ -44,7 +44,7 @@ elif mode == "play1":
         
     liz=xbmcgui.ListItem('Video')
     liz.setInfo( type="Video", infoLabels={ "Title": 'Video' } )
-    	
+    
     dt = threading.Thread(target=axel.download, args = (url, file_dest, file_name))
     dt.start()
       
@@ -62,7 +62,7 @@ elif mode == "play2":
     liz=xbmcgui.ListItem('Video 2')
     liz.setInfo( type="Video", infoLabels={ "Title": 'Video 2' } )
     	
-    link = 'http://127.0.0.1:64653/' + base64.b64encode(url)
+    link = 'http://127.0.0.1:%s/'%'45550' + base64.b64encode(url)
     xbmc.Player(xbmc.PLAYER_CORE_AUTO).play(link)
 
 

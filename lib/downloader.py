@@ -67,7 +67,7 @@ class Downloader(threading.Thread):
                 break
 
         chunk = ''
-        block_size = 1024
+        block_size = 1024*100
         remaining_blocks = length
 
         #TO-DO: Clean up while loop - don't call run() - exit loop and re-add to queue
@@ -95,7 +95,8 @@ class Downloader(threading.Thread):
                 print "Error occured retreiving data: %s" % e
                 return "data_error"
 
-            remaining_blocks -= fetch_size
+            #remaining_blocks -= fetch_size
+			remaining_blocks -=len(data_block) # we could've received less data
             chunk += data_block
 
         print 'Putting into resultQ Queue #: %d' % block_num

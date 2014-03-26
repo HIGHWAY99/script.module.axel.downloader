@@ -35,6 +35,7 @@ import os
 import multiprocessing
 #from downloader import Downloader
 import common
+import time
 
 #Create queue objects
 workQ = Queue.PriorityQueue()
@@ -51,7 +52,7 @@ class AxelDownloader:
         - 
     '''  
 
-    def __init__(self, num_connections=1, chunk_size=16*1024*5):#2000000
+    def __init__(self, num_connections=2, chunk_size=1024*1024):#2000000
         '''
         Class init      
         
@@ -81,6 +82,7 @@ class AxelDownloader:
         sIndex=-1;
         print 'check downloaded',start_byte
         print 'completedWork',completedWork
+        completedWork.sort(key=lambda x: x[1])
         for i, item in enumerate(completedWork):
             if start_byte>=item[1] and start_byte<=(item[1]+item[2]-1):
                 sIndex= i
@@ -89,14 +91,14 @@ class AxelDownloader:
         if sIndex==-1: return 0;#not downloaded yet
         eIndex= completedWork[sIndex][1]+completedWork[sIndex][2]-1;
         for i in range(sIndex+1, len(completedWork)) :  #forward till we find a gap or it ends
-            if completedWork[i][1]-1==eIndex: #if new chunk is joint with previous one
-                eIndex+=completedWork[i][2]
+            if completedWork[i-1][1]+completedWork[i-1][2]==completedWork[i][1]: #if new chunk is joint with previous one
+                eIndex=completedWork[i][1]+completedWork[i][2]-1;
             else:
                 break;
             if eIndex>=stopAt:
                 eIndex=stopAt;
                 break;
-        return eIndex;
+        return eIndex-start_byte+1;
 
     def getDownloadedPortion(self, start_byte,end_byte): #return whatever is downloaded so far starting from start_byte
 
@@ -108,7 +110,7 @@ class AxelDownloader:
 
         out_fd = open(self.fileFullPath, "rb")
         positionToRead=start_byte
-        filesizeToRead= start_byte-end_byte+1;
+        filesizeToRead= downloadBytes;
         dataToReturn=""
         out_fd.seek(positionToRead)
         dataToReturn=out_fd.read(filesizeToRead)
@@ -117,18 +119,21 @@ class AxelDownloader:
         #read from file, from sIndex to eIndex
     
     def repriotizeQueue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
+        print 'stop everyone, repriotizeQueue'
         stopEveryone=True
         isAllowed.acquire();#freeze everyone
+        print 'ok start looking into'
         currentQueue=[];
         while (not workQ.empty()):  #clear the queue
             currentQueue.append(workQ.get())
+        print 'left over',currentQueue
         currentQueue=sorted(currentQueue);# sort on block number as we could be in any sequence due to seek
         sIndex=-1
         for i, item in enumerate(currentQueue):
             if startingByte>=item[1] and startingByte<=(item[1]+item[1]-1):
                 sIndex= i
                 break;
-        
+        print 'sIndex starting point',sIndex
         if not sIndex==-1: #error here !
             newQueue=[]
             for i in range(0,len(currentQueue)):
@@ -136,7 +141,7 @@ class AxelDownloader:
                 newQueue.append(currentQueue[sIndex])
                 sIndex+=1;
                 if sIndex>len(currentQueue)-1: sIndex=0;#if reached end then start from beginning
-            
+            print 'newQueue',newQueue
             for i, item in enumerate(newQueue):
                 workQ.put(item)# recreate new queue in different order
         stopEveryone=False
@@ -180,6 +185,7 @@ class AxelDownloader:
             try:
   
                 #Grab items from queue to process
+
                 print 'trying to get the first chunk'
                 block_num, start_block,length, chunk_block = resultQ.get()
     
@@ -226,7 +232,8 @@ class AxelDownloader:
         
         while chunk_block > 0:
  
-            #Add chunk to work queue       
+            #Add chunk to work queue 
+            print 'adding chunk',[i, file_link, start_block, chunk_block]
             workQ.put([i, file_link, start_block, chunk_block])
         
             #Increment starting byte
@@ -291,6 +298,16 @@ class AxelDownloader:
         common.addon.log('Worker Queue Built', 2) 
           
         # Wait for the queues to finish - join to close all threads when done
+        while True:
+            isAllowed.acquire()
+            remaining= workQ.unfinished_tasks
+            isAllowed.release()
+            if remaining:
+                time.sleep(2);
+            else:
+                break;
+            
+        
         workQ.join()#timeout
         common.addon.log('Worker Queue successfully joined', 2)
         resultQ.join()
@@ -319,7 +336,7 @@ class Downloader(threading.Thread):
                 'text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
             'Accept-Language': 'en-us,en;q=0.5',
         }
-        self.block_size = 1024*16
+        self.block_size = 1024*500
 
 
     def run(self):
@@ -329,8 +346,11 @@ class Downloader(threading.Thread):
         
         while True:
             isAllowed.acquire();
-            block_num, url, start, length = workQ.get() ##put a time out here
+            block_num, url, start, length = workQ.get(block=False,timeout=2) ##put a time out here
             isAllowed.release();
+            if not workQ.unfinished_tasks:
+                print 'end of thread................'
+                return
             common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             #Download the file
@@ -342,27 +362,33 @@ class Downloader(threading.Thread):
                 common.addon.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
                 #Mark queue task as done
+                isAllowed.acquire();
                 workQ.task_done()
+                isAllowed.release();
 
             #503 - Likely too many connection attempts
             elif result == "503":
 
                 common.addon.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
                 
+                isAllowed.acquire();
                 #Mark queue task as done
                 workQ.task_done()
                 
                 #Put chunk back into workQ then break from loop/end thread
                 workQ.put([block_num, url, start, length])
+                isAllowed.release();
                 break
 
             else:
                 #Mark queue task as done
+                isAllowed.acquire();
                 workQ.task_done()
             
                 #Put chunk back into workQ
                 common.addon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 workQ.put([block_num, url, start, length])
+                isAllowed.release();
 
  
     def __download_file(self, block_num, url, start, length):        
@@ -425,9 +451,12 @@ class Downloader(threading.Thread):
                 return "data_error"
 
             remaining_blocks -= fetch_size
+            remaining_blocks-= len(data_block)
             curr_chunk += data_block
             print 'next chunk size',len(curr_chunk), remaining_blocks
         print 'done one chunk'
         common.addon.log('Adding to result Queue #: %d' % block_num, 2)
         resultQ.put([block_num, start,length, curr_chunk])
+        print [block_num, start,length]
+        print 'current completed',completedWork
         return True

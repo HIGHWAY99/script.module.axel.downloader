@@ -46,11 +46,20 @@ http_headers = {
     
 class MyHandler(BaseHTTPRequestHandler):
 
-           
+
     #Handles a HEAD request
     def do_HEAD(self):
+        self.send_response(200)
+        rtype="application/x-msvideo"
+        self.send_header("Content-type", rtype)
+        self.end_headers()
         # Only send the head #we should forward this
-        print "HEAD request"
+        #(file_url,file_name)=self.decode_B64_url(request_path)
+        ##file_size,file_url=self.get_file_size(file_url)# get the url again, need redirection implementation
+        #rtype="application/x-msvideo"
+        #etag=self.generate_ETag(file_url)
+        #self.send_http_headers(file_name, rtype, file_size , etag)
+        #print "HEAD request"
 
     #Handles a GET request.
     def do_GET(self):
@@ -130,7 +139,7 @@ class MyHandler(BaseHTTPRequestHandler):
         # Do we have to send a normal response or a range response?
         if s_range and not s_range=="bytes=0-0":
             self.send_response(206)
-            videoContents=self.get_video_portion(self.wfile, file_url, file_dest, file_name, srange,erange,downloader)
+            videoContents=self.get_video_portion( file_url, file_dest, file_name, srange,erange,downloader)
             portionLen=len(videoContents); #could be less than asked by xbmc
             crange="bytes "+str(srange)+"-" +str(int(srange+portionLen)-1)+"/"+str(content_size)#recalculate crange based on srange, portionLen and content_size 
             self.send_header("Content-Range",crange)
@@ -154,11 +163,11 @@ class MyHandler(BaseHTTPRequestHandler):
             print 'Exception sending video porting: %s' % e
             pass
 
-    def get_video_portion(self, file_out, file_link, file_dest, file_name, start_byte, end_byte, downloader):
+    def get_video_portion(self, file_link, file_dest, file_name, start_byte, end_byte, downloader):
         print 'Starting download at byte: %d' % start_byte
         
         full_path = os.path.join(common.profile_path, file_name)
-        MAX_RETURN_LENGTH=1024*1024*5; #5 meg
+        MAX_RETURN_LENGTH=1024*500; #500k
         if not downloader.started:
             #import axel
             #downloader = axel.AxelDownloader() # store in the same variable
@@ -179,17 +188,20 @@ class MyHandler(BaseHTTPRequestHandler):
         try:
             #Opening file
             print 'now checking'
-            if start_byte-end_byte>MAX_RETURN_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
-                end_byte = start_byte+MAX_RETURN_LENGTH;  
+            if (int(end_byte)-int(start_byte))>MAX_RETURN_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
+                end_byte = int(start_byte)+int(MAX_RETURN_LENGTH);  
 
-            print 'start and endbyte', start_byte,end_byte
+            print 'start and endbyte', start_byte,end_byte,MAX_RETURN_LENGTH
             print 'getting downloadedPortion'
             dataDownloaded=downloader.getDownloadedPortion(start_byte,end_byte)
             print 'getting downloadedPortion end'
             if len(dataDownloaded)==0:#no data yet?
+                print 'sleeping Not availble'
                 time.sleep(10)# sleep till we get some data
                 dataDownloaded=downloader.getDownloadedPortion(start_byte,end_byte)
-            print 'slep again downloadedPortion end'
+            else:
+                print 'no sleeeping, data available'
+ 
             #error checking here, if after 20 seconds we are not getting anything, means dataDownloaded is 0
 
             print 'content found: %d' % len(dataDownloaded)
@@ -302,7 +314,8 @@ class ThreadedHTTPServer(ThreadingMixIn, Server):
 
 #Address and IP for Proxy to listen on
 HOST_NAME = '127.0.0.1'
-PORT_NUMBER = 64653
+#HOST_NAME = 'localhost'
+PORT_NUMBER = 45550
 
 #Init file_cache - stores file information for repeat requests
 global file_cache
