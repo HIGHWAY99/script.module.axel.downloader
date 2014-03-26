@@ -76,7 +76,14 @@ class AxelDownloader:
         self.completed=False
         self.fileFullPath=""; #init with blank
         self.started=False
+        self.stopProcessing=False
         common.addon.log('Axel Downloader Intitialized')
+
+    
+    def terminate(self):
+        self.stopProcessing=True
+        for t in currentThreads:
+            t.terminate()
 
     def bytesDownloadedFrom(self, start_byte, stopAt): #tell us how many bytes are downloaded
         sIndex=-1;
@@ -91,8 +98,8 @@ class AxelDownloader:
         if sIndex==-1: return 0;#not downloaded yet
         eIndex= completedWork[sIndex][1]+completedWork[sIndex][2]-1;
         for i in range(sIndex+1, len(completedWork)) :  #forward till we find a gap or it ends
-            if completedWork[i-1][1]+completedWork[i-1][2]==completedWork[i][1]: #if new chunk is joint with previous one
-                eIndex=completedWork[i][1]+completedWork[i][2]-1;
+            if eIndex+1==completedWork[i][1]: #if new chunk is joint with previous one
+                eIndex+=completedWork[i][2];#add new length
             else:
                 break;
             if eIndex>=stopAt:
@@ -105,8 +112,7 @@ class AxelDownloader:
         downloadBytes=self.bytesDownloadedFrom(start_byte,end_byte);
         print 'downloadBytes:',downloadBytes
         if downloadBytes==0: return "";
-        if (end_byte-start_byte+1)>=downloadBytes:
-            end_byte=start_byte+downloadBytes;
+
 
         out_fd = open(self.fileFullPath, "rb")
         positionToRead=start_byte
@@ -115,6 +121,7 @@ class AxelDownloader:
         out_fd.seek(positionToRead)
         dataToReturn=out_fd.read(filesizeToRead)
         out_fd.close();
+        #print dataToReturn
         return dataToReturn
         #read from file, from sIndex to eIndex
     
@@ -122,6 +129,7 @@ class AxelDownloader:
         print 'stop everyone, repriotizeQueue'
         stopEveryone=True
         isAllowed.acquire();#freeze everyone
+        sleep(1); #give time so everyone are frozen
         print 'ok start looking into'
         currentQueue=[];
         while (not workQ.empty()):  #clear the queue
@@ -183,7 +191,7 @@ class AxelDownloader:
 
         while True:
             try:
-  
+                if self.stopProcessing: return
                 #Grab items from queue to process
 
                 print 'trying to get the first chunk'
@@ -199,6 +207,7 @@ class AxelDownloader:
                 #Tell queue that this task is done
                 resultQ.task_done()
                 completedWork.append ([block_num, start_block,length])
+                print 'currentDownloaded',completedWork
 
             except Exception, e:
                 common.addon.log_error('Failed writing block #%d :'  % (block_num, e))        
@@ -298,14 +307,14 @@ class AxelDownloader:
         common.addon.log('Worker Queue Built', 2) 
           
         # Wait for the queues to finish - join to close all threads when done
-        while True:
-            isAllowed.acquire()
-            remaining= workQ.unfinished_tasks
-            isAllowed.release()
-            if remaining:
-                time.sleep(2);
-            else:
-                break;
+        #while True:
+        #    isAllowed.acquire()
+        #    remaining= workQ.unfinished_tasks
+        #    isAllowed.release()
+        #    if remaining:
+        #        time.sleep(2);
+        #    else:
+        #        break;
             
         
         workQ.join()#timeout
@@ -336,7 +345,11 @@ class Downloader(threading.Thread):
                 'text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
             'Accept-Language': 'en-us,en;q=0.5',
         }
-        self.block_size = 1024*500
+        self.block_size = 1024*1024
+        self.stopProcessing=False
+
+    def terminate(self):
+        self.stopProcessing=True
 
 
     def run(self):
@@ -345,8 +358,9 @@ class Downloader(threading.Thread):
         '''
         
         while True:
+            if self.stopProcessing: return
             isAllowed.acquire();
-            block_num, url, start, length = workQ.get(block=False,timeout=2) ##put a time out here
+            block_num, url, start, length = workQ.get(block=False,timeout=5) ##put a time out here
             isAllowed.release();
             if not workQ.unfinished_tasks:
                 print 'end of thread................'
@@ -354,41 +368,49 @@ class Downloader(threading.Thread):
             common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             #Download the file
-            result = self.__download_file(block_num, url, start, length)
-
+            start_time = time.time()
+            result,chunkData = self.__download_file(block_num, url, start, length)
+            elapsed_time = time.time() - start_time
+            print 'time take ',elapsed_time
             #Check result status            
             if result == True:
                 #Tell queue that this task is done
                 common.addon.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
                 #Mark queue task as done
-                isAllowed.acquire();
+                
+                
+                common.addon.log('Adding to result Queue #: %d' % block_num, 2)
+                
+                resultQ.put([block_num, start,length, chunkData])
+                #isAllowed.acquire();
                 workQ.task_done()
-                isAllowed.release();
+                print [block_num, start,length]
+                #isAllowed.release();
 
             #503 - Likely too many connection attempts
             elif result == "503":
 
                 common.addon.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
                 
-                isAllowed.acquire();
+                #isAllowed.acquire();
                 #Mark queue task as done
                 workQ.task_done()
                 
                 #Put chunk back into workQ then break from loop/end thread
                 workQ.put([block_num, url, start, length])
-                isAllowed.release();
+                #isAllowed.release();
                 break
 
             else:
                 #Mark queue task as done
-                isAllowed.acquire();
+                #isAllowed.acquire();
                 workQ.task_done()
             
                 #Put chunk back into workQ
                 common.addon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 workQ.put([block_num, url, start, length])
-                isAllowed.release();
+                #isAllowed.release();
 
  
     def __download_file(self, block_num, url, start, length):        
@@ -403,60 +425,60 @@ class Downloader(threading.Thread):
         ''' 
         request = urllib2.Request(url, None, self.http_headers)
         if length == 0:
-            return None
+            return None,""
         request.add_header('Range', 'bytes=%d-%d' % (start, start + length))
 
-        if stopEveryone: return;
+        if stopEveryone: return None,"";
         #TO-DO: Add more url type error checks
         while 1:
             try:
                 data = urllib2.urlopen(request)
             except urllib2.URLError, e:
                 common.addon.log_error("Connection failed: %s" % e)
-                return str(e.code)                
+                return str(e.code),""               
             else:
                 break
 
+        if stopEveryone: return None,"";
         #Init working variables 
-        print 'testing here'
+        #print 'testing here'
         curr_chunk = ''
         remaining_blocks = length
-
+        dataLen=0
         #Read data blocks in specific size 1 at a time until we have the full chunk_block size
         while remaining_blocks > 0:
-            print 'remaining_blocks',remaining_blocks
-            if stopEveryone: return;
+            #print 'remaining_blocks',remaining_blocks
+            if stopEveryone: return None,"";
 
             if remaining_blocks >= self.block_size:
                 fetch_size = self.block_size
             else:
                 fetch_size = int(remaining_blocks)
-            print 'fetch_size',fetch_size
+            #print 'fetch_size',fetch_size
             try:
                 data_block = data.read(fetch_size)
-                if len(data_block) == 0:
+                dataLen=len(data_block)
+                print 'got data' ,dataLen
+                if dataLen == 0:
                     print 'zeroooooooooooooooooooooooooo'
                     common.addon.log("Connection: 0 sized block fetched. Retrying.", 0)
-                    return "no_block"
-                if len(data_block) != fetch_size:
-                    print 'mismatche.............................'
-                    common.addon.log("Connection: len(data_block) != length. Retrying.", 0)
-                    return "mismatch_block"
+                    return "no_block",""
+                #if len(data_block) != fetch_size:
+                #    print 'mismatche.............................'
+                #    common.addon.log("Connection: len(data_block) != length. Retrying.", 0)
+                #    return "mismatch_block",""
 
             except socket.timeout, s:
                 common.addon.log_error("Connection timed out with msg: %s" % s)
-                return "timeout"
+                return "timeout",""
             except Exception, e:
                 common.addon.log_error("Error occured retreiving data: %s" % e)
-                return "data_error"
+                return "data_error",""
 
-            remaining_blocks -= fetch_size
-            remaining_blocks-= len(data_block)
+            #remaining_blocks -= fetch_size
+            remaining_blocks-= dataLen
             curr_chunk += data_block
-            print 'next chunk size',len(curr_chunk), remaining_blocks
-        print 'done one chunk'
-        common.addon.log('Adding to result Queue #: %d' % block_num, 2)
-        resultQ.put([block_num, start,length, curr_chunk])
-        print [block_num, start,length]
-        print 'current completed',completedWork
-        return True
+            #print 'next chunk size',len(curr_chunk), remaining_blocks
+        #print 'done one chunk'
+        #print 'current completed',completedWork
+        return True,curr_chunk

@@ -21,11 +21,13 @@ class Downloader(threading.Thread):
             print length
 
             #Download the file
-            result = self.__download_file(block_num, url, start, length)
+            (result,chunkData) = self.__download_file(block_num, url, start, length)
 
             
-            if result == True:
+            if result==True:
                 #Tell queue that this task is done
+                print 'Putting into resultQ Queue #: %d' % block_num
+                resultQ.put([block_num, start, chunkData])
                 print 'Queue #: %s finished' % block_num
 
             #503 - Likely too many connection attempts
@@ -53,7 +55,7 @@ class Downloader(threading.Thread):
 
         request = urllib2.Request(url, None, headers)
         if length == 0:
-            return None
+            return (None,"")
         request.add_header('Range', 'bytes=%d-%d' % (start, start + length))
 
         #TO-DO: Better error checks and send back specific status code
@@ -62,7 +64,7 @@ class Downloader(threading.Thread):
                 data = urllib2.urlopen(request)
             except urllib2.URLError, e:
                 print "Connection failed: %s" % e
-                return str(e.code)                
+                return (str(e.code),"")                
             else:
                 break
 
@@ -83,22 +85,21 @@ class Downloader(threading.Thread):
                 data_block = data.read(fetch_size)
                 if len(data_block) == 0:
                     print "Connection: 0 sized block fetched. Retrying."
-                    return "no_block"
-                if len(data_block) != fetch_size:
-                    print "Connection: len(data_block) != length. Retrying."
-                    return "mismatch_block"
+                    return ("no_block","")
+                #if len(data_block) != fetch_size:
+                #    print "Connection: len(data_block) != length. Retrying."
+                #    return ("mismatch_block","")
 
             except socket.timeout, s:
                 print "Connection timed out with msg: %s" % s
-                return "timeout"
+                return ("timeout","")
             except Exception, e:
                 print "Error occured retreiving data: %s" % e
-                return "data_error"
+                return ("data_error","")
 
             #remaining_blocks -= fetch_size
-			remaining_blocks -=len(data_block) # we could've received less data
+            remaining_blocks -= len(data_block) # we could've received less data
             chunk += data_block
 
-        print 'Putting into resultQ Queue #: %d' % block_num
-        resultQ.put([block_num, start, chunk])
-        return True
+
+        return (True,chunk)

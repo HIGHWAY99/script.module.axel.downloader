@@ -148,8 +148,9 @@ class MyHandler(BaseHTTPRequestHandler):
             #Send back 200 reponse - OK
             self.send_response(200)
 
-        self.send_http_headers(file_name, rtype, content_size , etag)
 
+        self.send_http_headers(file_name, rtype, content_size , etag)
+  
         if len(videoContents)>0:
             self.send_video_content(self.wfile, videoContents)
 
@@ -175,7 +176,7 @@ class MyHandler(BaseHTTPRequestHandler):
             dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
             print 'Starting downloader '
             dt.start()
-            time.sleep(10)# sleep till we get some data
+            time.sleep(20)# sleep till we get some data
         else:
             if not downloader.completed:
                 totalBytes=downloader.bytesDownloadedFrom(start_byte,start_byte+MAX_RETURN_LENGTH)

@@ -23,7 +23,8 @@ season = addon.queries.get('season', None)
     
 if mode == 'main':
           
-    file_link ='http://download.wavetlan.com/SVV/Media/HTTP/H264/Other_Media/H264_test5_voice_mp4_480x360.mp4'
+    file_link ='http://lwx003.gear3rd.net/files/videos/2014/03/25/1395763892aba24-240.mp4'
+    #file_link='http://download.wavetlan.com/SVV/Media/HTTP/H264/Other_Media/H264_test5_voice_mp4_480x360.mp4'
     
     liz=xbmcgui.ListItem('Video')
     liz.setInfo( type="Video", infoLabels={ "Title": 'Video' } )
@@ -45,13 +46,13 @@ elif mode == "play1":
     liz=xbmcgui.ListItem('Video')
     liz.setInfo( type="Video", infoLabels={ "Title": 'Video' } )
     
-    dt = threading.Thread(target=axel.download, args = (url, file_dest, file_name))
-    dt.start()
+    #dt = threading.Thread(target=axel.download, args = (url, file_dest, file_name))
+    #dt.start()
       
-    if dt.isAlive():
-        full_path = os.path.join(file_dest, file_name)
-        addon.show_countdown(30, 'waiting', 'waiting for first part')      
-        xbmc.Player(xbmc.PLAYER_CORE_AUTO).play(full_path)
+    #if dt.isAlive():
+    #    full_path = os.path.join(file_dest, file_name)
+    #    addon.show_countdown(30, 'waiting', 'waiting for first part')      
+    xbmc.Player(xbmc.PLAYER_CORE_AUTO).play(url)
 
 elif mode == "play2":
    
