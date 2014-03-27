@@ -38,13 +38,7 @@ import common
 import time
 
 #Create queue objects
-workQ = Queue.PriorityQueue()
-resultQ = Queue.PriorityQueue()
-currentThreads=[]
-completedWork=[]
-isAllowed = multiprocessing.Condition()
-saveFileLock = multiprocessing.Condition()
-stopEveryone=False;        
+   
 class AxelDownloader:
 
     '''
@@ -53,7 +47,7 @@ class AxelDownloader:
         - 
     '''  
 
-    def __init__(self, num_connections=3, chunk_size=1024*1024):#2000000
+    def __init__(self, num_connections=2, chunk_size=1024*1024):#2000000
         '''
         Class init      
         
@@ -61,10 +55,18 @@ class AxelDownloader:
             num_connections (int): number of connections/threads to attempt to open for downloading
             chunk_size (int): size in bytes for each file 'chunk' to be downloaded per connection
         '''
+        self.workQ = Queue.PriorityQueue()
+        self.resultQ = Queue.PriorityQueue()
+        self.currentThreads=[]
+        self.completedWork=[]
+        self.isAllowed = multiprocessing.Condition()
+        self.saveFileLock = multiprocessing.Condition()
+        self.stopEveryone=False;     
 
         #Class variables
         self.num_conn = num_connections
         self.chunk_size = chunk_size
+        self.total_chunks = -1
 
         self.http_headers = {
             'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 6.1; '
@@ -78,19 +80,31 @@ class AxelDownloader:
         self.fileFullPath=""; #init with blank
         self.started=False
         self.stopProcessing=False
+        self.terminated=False
         common.addon.log('Axel Downloader Intitialized')
 
-    
+    def completed_work(self):
+        return self.completedWork
     def terminate(self):
         self.stopProcessing=True
-        for t,c in currentThreads:
+        for t,c in self.currentThreads:
             t.terminate()
+
+    def anythingDownloadYet(self, start_byte): #tell us how many bytes are downloaded
+        sIndex=-1;
+        for i, item in enumerate(self.completedWork):
+            if start_byte>=item[1] and start_byte<=(item[1]+item[2]-1):
+                sIndex= i
+                break;
+        #print 'indexfound',sIndex
+        if sIndex==-1: return False;#not downloaded yet
+        return True
 
     def bytesDownloadedFrom(self, start_byte, stopAt): #tell us how many bytes are downloaded
         sIndex=-1;
-        print 'check downloaded',start_byte,stopAt
-        print 'completedWork',completedWork
-        t_comwork=sorted(completedWork,key=lambda x: x[1])
+        #print 'check downloaded',start_byte,stopAt
+        #print 'self.completedWork',self.completedWork
+        t_comwork=sorted(self.completedWork,key=lambda x: x[1])
         for i, item in enumerate(t_comwork):
             if start_byte>=item[1] and start_byte<=(item[1]+item[2]-1):
                 sIndex= i
@@ -116,50 +130,52 @@ class AxelDownloader:
     def getDownloadedPortion(self, start_byte,end_byte): #return whatever is downloaded so far starting from start_byte
 
         downloadBytes=self.bytesDownloadedFrom(start_byte,end_byte);
-        print 'downloadBytes:',downloadBytes
+        #print 'downloadBytes:',downloadBytes
         if downloadBytes==0: return "",0;
 
-        saveFileLock.acquire();
+        self.saveFileLock.acquire();
         out_fd = open(self.fileFullPath, "rb")
         positionToRead=start_byte
         filesizeToRead= downloadBytes;
         dataToReturn=""
         out_fd.seek(positionToRead)
-        print 'seek',positionToRead,'read',filesizeToRead
+        #print 'seek',positionToRead,'read',filesizeToRead
         dataToReturn=out_fd.read(filesizeToRead)
         out_fd.close();
-        saveFileLock.release()
+        self.saveFileLock.release()
         #print dataToReturn
         return dataToReturn,filesizeToRead
         #read from file, from sIndex to eIndex
  
     def freezeAllThreads(self, freeze):
-        for t,c in currentThreads:
+        for t,c in self.currentThreads:
             if freeze:
                 c.acquire()
             else:
                 c.release()
     def repriotizeQueue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
         print 'stop everyone, repriotizeQueue'
-        stopEveryone=True
+        self.stopEveryone=True
         print 'wait for the condition'
 
-        #isAllowed.acquire();#freeze everyone
+        #self.isAllowed.acquire();#freeze everyone
         #time.sleep(2); #give time so everyone are frozen
         self.freezeAllThreads(True)
         print 'thread frozen'
-        saveFileLock.acquire(); #try again
+        self.saveFileLock.acquire(); #try again
+        self.isAllowed.acquire();
         print 'save frozen'
         downloadBytes=self.bytesDownloadedFrom(startingByte,startingByte+10); #just check again
         
         if not downloadBytes==0: 
+             self.isAllowed.release()
              self.freezeAllThreads(False)
-             saveFileLock.release();
+             self.saveFileLock.release();
              return #transient situation
         print 'ok start looking into'
         currentQueue=[];
-        while (not workQ.empty()):  #clear the queue
-            currentQueue.append(workQ.get())
+        while (not self.workQ.empty()):  #clear the queue
+            currentQueue.append(self.workQ.get())
         print 'left over',currentQueue
         currentQueue.sort(key=lambda x: x[2]);# sort on start number as we could be in any sequence due to seek,,front to back and so on
         sIndex=-1
@@ -177,12 +193,12 @@ class AxelDownloader:
                 if sIndex>len(currentQueue)-1: sIndex=0;#if reached end then start from beginning
             print 'newQueue',newQueue
             for i, item in enumerate(newQueue):
-                workQ.put(item)# recreate new queue in different order
-        stopEveryone=False
+                self.workQ.put(item)# recreate new queue in different order
+        self.stopEveryone=False
         self.freezeAllThreads(False)
-        saveFileLock.release();
-        #isAllowed.release(); #start downloading again but in different priority
-
+        self.saveFileLock.release();
+        self.isAllowed.release(); #start downloading again but in different priority
+        
 
     #def stop()
     #    StopFreeAllrunningthreads;
@@ -220,13 +236,13 @@ class AxelDownloader:
         while True:
             try:
                 if self.stopProcessing: return
-                saveFileLock.acquire()
+                self.saveFileLock.acquire()
                 #Grab items from queue to process
                 try:
                     block_num=-1
-                    block_num, start_block,length, chunk_block = resultQ.get(block=False,timeout=1)  
+                    block_num, start_block,length, chunk_block = self.resultQ.get(block=False,timeout=1)  
                 except Exception, e:
-                    saveFileLock.release()
+                    self.saveFileLock.release()
                     continue
                 
                 #print 'trying to get the first chunk'
@@ -240,8 +256,8 @@ class AxelDownloader:
                 out_fd.close()
                 
                 #Tell queue that this task is done
-                resultQ.task_done()
-                completedWork.append ([block_num, start_block,length])
+                self.resultQ.task_done()
+                self.completedWork.append ([block_num, start_block,length])
 
 
             except Exception, e:
@@ -249,10 +265,10 @@ class AxelDownloader:
                 common.addon.log_error('Failed writing block #%d :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
-                resultQ.task_done()
-                resultQ.put([block_num, start_block,length, chunk_block])    
+                self.resultQ.task_done()
+                self.resultQ.put([block_num, start_block,length, chunk_block])    
             
-            saveFileLock.release()
+            self.saveFileLock.release()
 
     def __build_workq(self, file_link):
         '''
@@ -280,7 +296,7 @@ class AxelDownloader:
  
             #Add chunk to work queue 
             #print 'adding chunk',[i, file_link, start_block, chunk_block]
-            workQ.put([i, file_link, start_block, chunk_block])
+            self.workQ.put([i, file_link, start_block, chunk_block])
         
             #Increment starting byte
             start_block += chunk_block
@@ -295,6 +311,7 @@ class AxelDownloader:
         
             #Increment i - used to set queue priority
             i += 1
+        self.total_chunks=i
     
 
     def download(self, file_link, file_dest='', file_name='',start_byte=0):
@@ -322,14 +339,15 @@ class AxelDownloader:
         os.close(out_fd)
         self.fileFullPath=out_file
         common.addon.log('Worker threads processing', 2)
-        isAllowed.acquire();
+        self.isAllowed.acquire();
         self.started=True
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
             keepProcessing = multiprocessing.Condition()
             t = Downloader()
             t.setKeepProcessing(keepProcessing)
-            currentThreads.append([t,keepProcessing])
+            t.caller = self
+            self.currentThreads.append([t,keepProcessing])
             t.start()
         common.addon.log('Worker threads initialized', 2)
         
@@ -342,26 +360,43 @@ class AxelDownloader:
         
         #Build workQ items
         self.__build_workq(file_link)
-        isAllowed.release()
+        self.isAllowed.release()
         common.addon.log('Worker Queue Built', 2) 
           
         # Wait for the queues to finish - join to close all threads when done
-        #while True:
-        #    isAllowed.acquire()
-        #    remaining= workQ.unfinished_tasks
-        #    isAllowed.release()
-        #    if remaining:
-        #        time.sleep(2);
-        #    else:
-        #        break;
-            
+        while True:
+            if self.stopProcessing:
+                break;
+            self.isAllowed.acquire()
+            remaining= self.workQ.unfinished_tasks
+            self.isAllowed.release()
+
+            if remaining:
+                time.sleep(5);
+            else:
+                break;
         
-        workQ.join()#timeout
-        common.addon.log('Worker Queue successfully joined', 2)
-        resultQ.join()
-        common.addon.log('Result Queue successfully joined', 2)
-        self.completed=True
-        #stopAllThreads; todo
+        if not self.stopProcessing:
+            print 'now final join'
+            self.workQ.join()#timeout
+            common.addon.log('Worker Queue successfully joined', 2)
+            if self.resultQ.unfinished_tasks:
+                time.sleep(6)#give time to results to finish.
+            if not self.resultQ.unfinished_tasks:
+                self.resultQ.join()
+                common.addon.log('Result Queue successfully joined', 2)
+            else:
+                print 'something wrong, tasks are finished but results are not in'
+            self.completed=True
+            print 'terminating'
+            self.terminate()
+            print 'DOWNLOAD COMPLETED'
+            self.terminate();
+        else:
+            print 'Ternimating... by user'
+        print 'THE END'
+        self.terminated=True
+        #todo: delete if saving not required.
         #Rename file from .part to intended name
         #os.rename(part_file, out_file)
 
@@ -384,9 +419,10 @@ class Downloader(threading.Thread):
                 'text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
             'Accept-Language': 'en-us,en;q=0.5',
         }
-        self.block_size = 1024*50
+        self.block_size = 1024*500
         self.stopProcessing=False
         self.keepProcessing=None
+        self.caller=None
 
     def terminate(self):
         self.stopProcessing=True
@@ -403,17 +439,17 @@ class Downloader(threading.Thread):
         while True:
             if self.stopProcessing: return
             self.keepProcessing.acquire()
-            isAllowed.acquire();
+            self.caller.isAllowed.acquire();
             try:
                 block_num=-1
-                block_num, url, start, length = workQ.get(block=False,timeout=1) ##put a time out here
+                block_num, url, start, length = self.caller.workQ.get(block=False,timeout=1) ##put a time out here
             except Exception, e:
                 self.keepProcessing.release()
                 pass
-            isAllowed.release();
+            self.caller.isAllowed.release();
             
-            if not workQ.unfinished_tasks:
-                self.keepProcessing.release()
+            if not self.caller.workQ.unfinished_tasks:
+                #self.keepProcessing.release()
                 print 'end of thread................'
                 return
             #common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
@@ -435,8 +471,8 @@ class Downloader(threading.Thread):
                 
                 
                 #common.addon.log('Adding to result Queue #: %d' % block_num, 2)
-                resultQ.put([block_num, start,length, chunkData])
-                workQ.task_done()
+                self.caller.resultQ.put([block_num, start,length, chunkData])
+                self.caller.workQ.task_done()
                 
                 #isAllowed.acquire();
                 
@@ -450,21 +486,21 @@ class Downloader(threading.Thread):
                 
                 #isAllowed.acquire();
                 #Mark queue task as done
-                workQ.task_done()
+                self.caller.workQ.task_done()
                 
                 #Put chunk back into workQ then break from loop/end thread
-                workQ.put([block_num, url, start, length])
+                self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
                 break
 
             else:
                 #Mark queue task as done
                 #isAllowed.acquire();
-                workQ.task_done()
+                self.caller.workQ.task_done()
             
                 #Put chunk back into workQ
                 common.addon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
-                workQ.put([block_num, url, start, length])
+                self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
             self.keepProcessing.release()
 
@@ -484,7 +520,7 @@ class Downloader(threading.Thread):
             return None,""
         request.add_header('Range', 'bytes=%d-%d' % (start, start + length))
 
-        if stopEveryone: return None,"";
+        if self.caller.stopEveryone: return None,"";
         #TO-DO: Add more url type error checks
         while 1:
             try:
@@ -495,7 +531,7 @@ class Downloader(threading.Thread):
             else:
                 break
 
-        if stopEveryone: return None,"";
+        if self.caller.stopEveryone: return None,"";
         #Init working variables 
         #print 'testing here'
         curr_chunk = ''
@@ -504,7 +540,7 @@ class Downloader(threading.Thread):
         #Read data blocks in specific size 1 at a time until we have the full chunk_block size
         while remaining_blocks > 0:
             #print 'remaining_blocks',remaining_blocks
-            if stopEveryone: return None,"";
+            if self.caller.stopEveryone: return None,"";
 
             if remaining_blocks >= self.block_size:
                 fetch_size = self.block_size

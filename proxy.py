@@ -82,6 +82,20 @@ class MyHandler(BaseHTTPRequestHandler):
             #Pull apart request path
             request_path=self.path[1:]       
             request_path=re.sub(r"\?.*","",request_path)
+            #If a request to stop is sent, shut down the proxy
+            if request_path.lower()=="stop":
+                sys.exit()
+            if request_path.lower()=="status":
+                print 'Get STatus Call!'
+                self.respondStatus();
+                self.wfile.close()
+                return
+            if  request_path.lower()=='stopdownload' :
+                file_stop=re.findall( '=(.*)',self.path[1:])[0]
+                print 'Get stop download Call!',request_path,file_stop
+                self.respondStopDownload(file_stop);
+                self.wfile.close()
+                return
 
             #If a range was sent in with the header
             requested_range=self.headers.getheader("Range")
@@ -92,12 +106,11 @@ class MyHandler(BaseHTTPRequestHandler):
             #Expecting url to be sent in base64 encoded - saves any url issues with XBMC
             (file_url,file_name)=self.decode_B64_url(request_path)
 
+
             #Send file request
             self.handle_send_request(file_url, file_name, requested_range)
         
-            #If a request to stop is sent, shut down the proxy
-            if request_path=="stop":
-                sys.exit()
+
 
         except:
             #Print out a stack trace
@@ -109,7 +122,102 @@ class MyHandler(BaseHTTPRequestHandler):
 
         #Close output stream file
         self.wfile.close()
+        return
 
+    def respondStopDownload(self,filename):
+        #response='Stopping',filename#self.getStatus()
+        response=self.stopDownlading(filename)
+        if response==True:
+            response="Termination has been Queued!"
+
+        print response
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.send_header('Content-length', len(response))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def stopDownlading(self,filename):
+        #response='Stopping',filename#self.getStatus()
+        print 'stopping',filename
+        cached = self.get_from_cache(filename)   
+        if cached:
+            (file_size, file_name,downloader,writeAccess) = cached
+            downloader.terminate();
+            if self.remove_from_cache(filename):
+                response=True
+        else:
+            response="file not found"
+        
+        return response
+
+    def respondStatus(self):
+        response=self.getStatus()
+        print response
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.send_header('Content-length', len(response))
+        self.end_headers()
+        self.wfile.write(response)
+
+
+    def getStatus(self):
+        global file_cache
+        try:
+            if len(file_cache):
+                htmlText="<html><head></head><body>"
+                htmlText+="<table width=100pc>"
+                htmlText+= "<TR>"
+                htmlText+= "<TD>Action</TD>"
+                htmlText+= "<TD>File Name </TD>"
+                htmlText+= "<TD>File Size (MB) (bytes)</TD>"
+                htmlText+= "<TD>Completed</TD>"
+                htmlText+= "<TD>Terminated</TD>"
+                htmlText+= "<TD>Chunks Size (KB)</TD>"
+                htmlText+= "<TD>Total Chunks</TD>"
+                htmlText+= "<TD>Total Chunks Completed</TD>"
+                htmlText+= "<TD>Total Chunks Remaining</TD>"
+                htmlText+= "</TR>"
+                #if 1==2:
+                for fn in file_cache:
+                    file_size, file_name,downloader,writeAccess=file_cache[fn]
+                    htmlText+= "<TR>"
+                    htmlText+= "<TD><a href=\"http://127.0.0.1:" +str(PORT_NUMBER)+ "/StopDownload?fname="+ file_name + "\">Stop</a></TD>"
+                    htmlText+= "<TD>"+ file_name+"</TD>"
+                    htmlText+= "<TD>"+ str(int(file_size)/1024/1024 )+"</TD>"
+                    htmlText+= "<TD>"+ str(downloader.completed) +"</TD>"
+                    htmlText+= "<TD>"+ str(downloader.terminated) +"</TD>"
+                    htmlText+= "<TD>"+ str(downloader.chunk_size/1024) +"</TD>"
+                    htmlText+= "<TD>"+ str(downloader.total_chunks) +"</TD>"
+                    htmlText+= "<TD>"+ str(len(downloader.completed_work())) +"</TD>"
+                    htmlText+= "<TD>"+ str(downloader.total_chunks-len(downloader.completed_work())) +"</TD>"
+                    htmlText+= "</TR>"
+                    htmlText+= "<TR>"
+                    htmlText+= "<TD colspan=9>"
+                    htmlText+= "<table><TR>"
+                    L=downloader.completed_work()
+                    print L
+                    
+                    for index in range(0,downloader.total_chunks):
+                        cellW=100/downloader.total_chunks
+                        s_number=index*downloader.chunk_size
+                        if len(L):
+                            if  len([b for b,s in enumerate(L) if s[1] == s_number])>0:
+                                htmlText+= "<TD bgcolor=green width=" + str(int(cellW)) + "pc>|</TD>"
+                            else:
+                                htmlText+= "<TD bgcolor=red width=" + str(int(cellW)) + "pc>|</TD>"
+                    htmlText+= "</TR></table>"
+                    htmlText+= "</TD></TR>"
+
+                htmlText+="</table>"
+                htmlText+="</body></html>" 
+                print htmlText
+                return htmlText
+            else:
+                return 'Nothing in cache/downloading'
+        except Exception, e:
+            print 'Exception creating status: %s' % e
+            return 'Error in status' #connection drop
     
     def handle_send_request(self, file_url, file_name, s_range):
 
@@ -163,9 +271,6 @@ class MyHandler(BaseHTTPRequestHandler):
         self.send_http_headers(file_name, rtype, content_size , etag)
   
         if portionLen>0:
-            print 'taking access'
-            #writeAccess.acquire()
-            print 'access gotcha'
             
             dataSent=self.send_video_content(self.wfile, videoContents)
             try:
@@ -179,29 +284,24 @@ class MyHandler(BaseHTTPRequestHandler):
             except:
                 print "Connection closed."
                 return
-            #writeAccess.release()
 
 
     def send_video_content(self,file_out, videoData):
         try:
-            print 'sending.....................', len(videoData)#,repr(videoData)
-            lenOfData=len(videoData)
-            #while lenOfData>0
-                
             file_out.write(videoData);
             file_out.flush();
-            #file_out.close();
-            print 'sent.....................'
+
             return True
         except Exception, e:
             print 'Exception sending video porting: %s' % e
             return False #connection drop
 
     def get_video_portion(self, file_link, file_dest, file_name, start_byte, end_byte, downloader):
-        print 'Starting download at byte: %d' % start_byte
+        #print 'Starting download at byte: %d' % start_byte
         lenOfData=0
         full_path = os.path.join(common.profile_path, file_name)
         MAX_RETURN_LENGTH=1024*500; #500k
+        if downloader.stopProcessing: return ""#stop by someone!
         if not downloader.started:
             #import axel
             #downloader = axel.AxelDownloader() # store in the same variable
@@ -212,37 +312,30 @@ class MyHandler(BaseHTTPRequestHandler):
             time.sleep(10)# sleep till we get some data, this is first time only
         else:
             if not downloader.completed:
-                totalBytes=downloader.bytesDownloadedFrom(start_byte,start_byte+MAX_RETURN_LENGTH)
-                print 'repriotizeQueue checking'
-                if totalBytes<MAX_RETURN_LENGTH: #if we do not have enough data
+                if not downloader.anythingDownloadYet(start_byte):
                     downloader.repriotizeQueue(start_byte)#tell threads to move to this new location
-                    time.sleep(10)# sleep till we get some data
-                else:
-                    print 'repriotizeQueue not required'
+                    time.sleep(5)# sleep till we get some data
+                #else:
+                #    print 'repriotizeQueue not required'
 
 
         fileContents=""
         try:
             #Opening file
-            print 'now checking'
+            #print 'now checking'
             if (int(end_byte)-int(start_byte))>MAX_RETURN_LENGTH: # how much data asked by xbmc#too much? remember we are sending chunks
                 end_byte = int(start_byte)+int(MAX_RETURN_LENGTH)-1;  
 
-            print 'start and endbyte', start_byte,end_byte,MAX_RETURN_LENGTH,end_byte-start_byte
-            print 'getting downloadedPortion'
-            dataDownloaded,lenOfData=downloader.getDownloadedPortion(start_byte,end_byte)
-            print 'getting downloadedPortion end'
-            if lenOfData==0:#no data yet?
-                print 'sleeping Not availble'
-                time.sleep(10)# sleep till we get some data
-                dataDownloaded,lenOfData=downloader.getDownloadedPortion(start_byte,end_byte)
-            else:
-                print 'no sleeeping, data available'
- 
-            #error checking here, if after 20 seconds we are not getting anything, means dataDownloaded is 0
-
-            print 'content found: %d' % len(dataDownloaded),lenOfData
-            fileContents=dataDownloaded
+            #print 'start and endbyte', start_byte,end_byte,MAX_RETURN_LENGTH,end_byte-start_byte
+            #print 'getting downloadedPortion'
+            tries=0
+            while not downloader.anythingDownloadYet(start_byte):
+                time.sleep(2)
+                tries+=1
+                if tries>5: return ""# can't wait forever
+            #print 'getting downloadedPortion end'
+            fileContents,lenOfData=downloader.getDownloadedPortion(start_byte,end_byte)
+            print 'getting downloadedPortion end',lenOfData 
         except Exception, e:
             print 'Exception sending file: %s' % e
             pass
@@ -321,6 +414,13 @@ class MyHandler(BaseHTTPRequestHandler):
             return file_cache[name]
         except:
             return None
+    def remove_from_cache(self, name):
+        global file_cache
+        try:
+            del file_cache[name]
+            return True
+        except:
+            return False
 
 
     def save_to_cache(self, name, details):
