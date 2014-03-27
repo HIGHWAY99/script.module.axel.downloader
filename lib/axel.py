@@ -43,6 +43,7 @@ resultQ = Queue.PriorityQueue()
 currentThreads=[]
 completedWork=[]
 isAllowed = multiprocessing.Condition()
+saveFileLock = multiprocessing.Condition()
 stopEveryone=False;        
 class AxelDownloader:
 
@@ -52,7 +53,7 @@ class AxelDownloader:
         - 
     '''  
 
-    def __init__(self, num_connections=2, chunk_size=1024*1024):#2000000
+    def __init__(self, num_connections=3, chunk_size=1024*1024):#2000000
         '''
         Class init      
         
@@ -82,63 +83,88 @@ class AxelDownloader:
     
     def terminate(self):
         self.stopProcessing=True
-        for t in currentThreads:
+        for t,c in currentThreads:
             t.terminate()
 
     def bytesDownloadedFrom(self, start_byte, stopAt): #tell us how many bytes are downloaded
         sIndex=-1;
-        print 'check downloaded',start_byte
+        print 'check downloaded',start_byte,stopAt
         print 'completedWork',completedWork
-        completedWork.sort(key=lambda x: x[1])
-        for i, item in enumerate(completedWork):
+        t_comwork=sorted(completedWork,key=lambda x: x[1])
+        for i, item in enumerate(t_comwork):
             if start_byte>=item[1] and start_byte<=(item[1]+item[2]-1):
                 sIndex= i
                 break;
-        print 'indexfound',sIndex
+        #print 'indexfound',sIndex
         if sIndex==-1: return 0;#not downloaded yet
-        eIndex= completedWork[sIndex][1]+completedWork[sIndex][2]-1;
-        for i in range(sIndex+1, len(completedWork)) :  #forward till we find a gap or it ends
-            if eIndex+1==completedWork[i][1]: #if new chunk is joint with previous one
-                eIndex+=completedWork[i][2];#add new length
+        eIndex= t_comwork[sIndex][1]+t_comwork[sIndex][2]-1;
+        #print 'eIndex',eIndex
+        for i in range(sIndex+1, len(t_comwork)) :  #forward till we find a gap or it ends
+            if t_comwork[i-1][1]+t_comwork[i-1][2]==t_comwork[i][1]: #if new chunk is joint with previous one
+                eIndex=t_comwork[i][1]+t_comwork[i][2]-1;#add new length
+                #print 'eIndexInside',eIndex,stopAt
             else:
                 break;
-            if eIndex>=stopAt:
+            if eIndex>stopAt:
                 eIndex=stopAt;
                 break;
+        if eIndex>stopAt:
+            eIndex=stopAt;
+   
         return eIndex-start_byte+1;
 
     def getDownloadedPortion(self, start_byte,end_byte): #return whatever is downloaded so far starting from start_byte
 
         downloadBytes=self.bytesDownloadedFrom(start_byte,end_byte);
         print 'downloadBytes:',downloadBytes
-        if downloadBytes==0: return "";
+        if downloadBytes==0: return "",0;
 
-
+        saveFileLock.acquire();
         out_fd = open(self.fileFullPath, "rb")
         positionToRead=start_byte
         filesizeToRead= downloadBytes;
         dataToReturn=""
         out_fd.seek(positionToRead)
+        print 'seek',positionToRead,'read',filesizeToRead
         dataToReturn=out_fd.read(filesizeToRead)
         out_fd.close();
+        saveFileLock.release()
         #print dataToReturn
-        return dataToReturn
+        return dataToReturn,filesizeToRead
         #read from file, from sIndex to eIndex
-    
+ 
+    def freezeAllThreads(self, freeze):
+        for t,c in currentThreads:
+            if freeze:
+                c.acquire()
+            else:
+                c.release()
     def repriotizeQueue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
         print 'stop everyone, repriotizeQueue'
         stopEveryone=True
-        isAllowed.acquire();#freeze everyone
-        sleep(1); #give time so everyone are frozen
+        print 'wait for the condition'
+
+        #isAllowed.acquire();#freeze everyone
+        #time.sleep(2); #give time so everyone are frozen
+        self.freezeAllThreads(True)
+        print 'thread frozen'
+        saveFileLock.acquire(); #try again
+        print 'save frozen'
+        downloadBytes=self.bytesDownloadedFrom(startingByte,startingByte+10); #just check again
+        
+        if not downloadBytes==0: 
+             self.freezeAllThreads(False)
+             saveFileLock.release();
+             return #transient situation
         print 'ok start looking into'
         currentQueue=[];
         while (not workQ.empty()):  #clear the queue
             currentQueue.append(workQ.get())
         print 'left over',currentQueue
-        currentQueue=sorted(currentQueue);# sort on block number as we could be in any sequence due to seek
+        currentQueue.sort(key=lambda x: x[2]);# sort on start number as we could be in any sequence due to seek,,front to back and so on
         sIndex=-1
         for i, item in enumerate(currentQueue):
-            if startingByte>=item[1] and startingByte<=(item[1]+item[1]-1):
+            if startingByte>=item[2] and startingByte<=(item[2]+item[3]-1):
                 sIndex= i
                 break;
         print 'sIndex starting point',sIndex
@@ -153,7 +179,9 @@ class AxelDownloader:
             for i, item in enumerate(newQueue):
                 workQ.put(item)# recreate new queue in different order
         stopEveryone=False
-        isAllowed.release(); #start downloading again but in different priority
+        self.freezeAllThreads(False)
+        saveFileLock.release();
+        #isAllowed.release(); #start downloading again but in different priority
 
 
     #def stop()
@@ -192,30 +220,39 @@ class AxelDownloader:
         while True:
             try:
                 if self.stopProcessing: return
+                saveFileLock.acquire()
                 #Grab items from queue to process
+                try:
+                    block_num=-1
+                    block_num, start_block,length, chunk_block = resultQ.get(block=False,timeout=1)  
+                except Exception, e:
+                    saveFileLock.release()
+                    continue
+                
+                #print 'trying to get the first chunk'
 
-                print 'trying to get the first chunk'
-                block_num, start_block,length, chunk_block = resultQ.get()
-    
                 #Write downloaded blocks to file
                 common.addon.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
+                
                 out_fd = open(out_file, "r+b")      
                 out_fd.seek(start_block, 0)
                 out_fd.write(chunk_block)
                 out_fd.close()
-    
+                
                 #Tell queue that this task is done
                 resultQ.task_done()
                 completedWork.append ([block_num, start_block,length])
-                print 'currentDownloaded',completedWork
+
 
             except Exception, e:
+              
                 common.addon.log_error('Failed writing block #%d :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
                 resultQ.task_done()
                 resultQ.put([block_num, start_block,length, chunk_block])    
-
+            
+            saveFileLock.release()
 
     def __build_workq(self, file_link):
         '''
@@ -242,7 +279,7 @@ class AxelDownloader:
         while chunk_block > 0:
  
             #Add chunk to work queue 
-            print 'adding chunk',[i, file_link, start_block, chunk_block]
+            #print 'adding chunk',[i, file_link, start_block, chunk_block]
             workQ.put([i, file_link, start_block, chunk_block])
         
             #Increment starting byte
@@ -289,8 +326,10 @@ class AxelDownloader:
         self.started=True
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
+            keepProcessing = multiprocessing.Condition()
             t = Downloader()
-            currentThreads.append(t)
+            t.setKeepProcessing(keepProcessing)
+            currentThreads.append([t,keepProcessing])
             t.start()
         common.addon.log('Worker threads initialized', 2)
         
@@ -345,47 +384,63 @@ class Downloader(threading.Thread):
                 'text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
             'Accept-Language': 'en-us,en;q=0.5',
         }
-        self.block_size = 1024*1024
+        self.block_size = 1024*50
         self.stopProcessing=False
+        self.keepProcessing=None
 
     def terminate(self):
         self.stopProcessing=True
+
+    def setKeepProcessing(self,C):
+        self.keepProcessing=C
 
 
     def run(self):
         '''
         Override threads run() method to do our download work
         '''
-        
+
         while True:
             if self.stopProcessing: return
+            self.keepProcessing.acquire()
             isAllowed.acquire();
-            block_num, url, start, length = workQ.get(block=False,timeout=5) ##put a time out here
+            try:
+                block_num=-1
+                block_num, url, start, length = workQ.get(block=False,timeout=1) ##put a time out here
+            except Exception, e:
+                self.keepProcessing.release()
+                pass
             isAllowed.release();
+            
             if not workQ.unfinished_tasks:
+                self.keepProcessing.release()
                 print 'end of thread................'
                 return
-            common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
+            #common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
+            if block_num==-1:
+                time.sleep(1)
+                continue 
             #Download the file
             start_time = time.time()
             result,chunkData = self.__download_file(block_num, url, start, length)
             elapsed_time = time.time() - start_time
-            print 'time take ',elapsed_time
+            #print 'time take ',elapsed_time
             #Check result status            
             if result == True:
                 #Tell queue that this task is done
-                common.addon.log('Worker Queue #: %d downloading finished' % block_num, 2)
+                #common.addon.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
                 #Mark queue task as done
                 
                 
-                common.addon.log('Adding to result Queue #: %d' % block_num, 2)
-                
+                #common.addon.log('Adding to result Queue #: %d' % block_num, 2)
                 resultQ.put([block_num, start,length, chunkData])
-                #isAllowed.acquire();
                 workQ.task_done()
-                print [block_num, start,length]
+                
+                #isAllowed.acquire();
+                
+                #print [block_num, start,length]
                 #isAllowed.release();
 
             #503 - Likely too many connection attempts
@@ -411,6 +466,7 @@ class Downloader(threading.Thread):
                 common.addon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 workQ.put([block_num, url, start, length])
                 #isAllowed.release();
+            self.keepProcessing.release()
 
  
     def __download_file(self, block_num, url, start, length):        
@@ -458,7 +514,7 @@ class Downloader(threading.Thread):
             try:
                 data_block = data.read(fetch_size)
                 dataLen=len(data_block)
-                print 'got data' ,dataLen
+                #print 'got data' ,dataLen
                 if dataLen == 0:
                     print 'zeroooooooooooooooooooooooooo'
                     common.addon.log("Connection: 0 sized block fetched. Retrying.", 0)
