@@ -201,7 +201,7 @@ class MyHandler(BaseHTTPRequestHandler):
         print 'Starting download at byte: %d' % start_byte
         lenOfData=0
         full_path = os.path.join(common.profile_path, file_name)
-        MAX_RETURN_LENGTH=1024*200; #200k
+        MAX_RETURN_LENGTH=1024*500; #500k
         if not downloader.started:
             #import axel
             #downloader = axel.AxelDownloader() # store in the same variable
@@ -311,6 +311,7 @@ class MyHandler(BaseHTTPRequestHandler):
     def decode_B64_url(self, b64):
         url = base64.b64decode(b64)
         file_name = url.split('/')[-1]
+        file_name=file_name.split('?')[0]
         return (url, file_name )
 
 
