@@ -418,13 +418,8 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         self.runningthread=None#current downloads that happening
         self.host_name=HOST_NAME
         self.port=PORT_NUMBER
-        self.RunningUnderXBMC=False
-        try:
-            import xbmc
-            self.RunningUnderXBMC=True
-        except:
-            print 'not rnning under RunningUnderXBMC'
-            pass
+        self.abort=False
+       
 
     def is_running(self):
         if self.runningthread:
@@ -445,16 +440,6 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
     def restart_proxy(self,download_folder='',port=0, host_name=''):#todo: use download_folder and other parameters
         print 'restart it it' #todo kill the thread and call start_proxy
 
-    def abort_requested(self):
-        try:
-            if self.RunningUnderXBMC:
-                #import xbmc
-                return xbmc.abortRequested
-                
-            else:
-                return False #TODO: find a better way to get this terminated        
-        except:
-            return False
             
     def start_proxy_internal(self,download_folder,port,host_name):#todo: use download_folder and other parameters
 
@@ -468,7 +453,7 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         print 'Press CTL break to stop.....'
         while(True):
             httpd.handle_request()
-            if self.abort_requested(): 
+            if self.abort: 
                 print 'breaking..........................'
                 break
         httpd.server_close()
