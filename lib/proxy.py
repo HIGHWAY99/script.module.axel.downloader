@@ -446,12 +446,16 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         print 'restart it it' #todo kill the thread and call start_proxy
 
     def abort_requested(self):
-        if self.RunningUnderXBMC:
-            import xbmc
-            return xbmc.abortRequested
-        else:
-            return False #TODO: find a better way to get this terminated        
-    
+        try:
+            if self.RunningUnderXBMC:
+                #import xbmc
+                return xbmc.abortRequested
+                
+            else:
+                return False #TODO: find a better way to get this terminated        
+        except:
+            return False
+            
     def start_proxy_internal(self,download_folder,port,host_name):#todo: use download_folder and other parameters
 
         socket.setdefaulttimeout(10)
