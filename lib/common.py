@@ -15,10 +15,21 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-
+#todo remove them from here
 import os    
 from t0mm0.common.addon import Addon
 
 addon = Addon('script.module.axel.downloader')
 addon_path = addon.get_path()
 profile_path = addon.get_profile()
+
+
+#Create queue objects
+class _Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(_Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+class Singleton(_Singleton('SingletonMeta', (object,), {})): pass
