@@ -23,10 +23,15 @@ import common
 import proxy
 # This is xbmc linked class. TODO: read the settings here and send it to proxy for port etc
 #TODO: check if start at launch setting is configured!
-#todo find a better way to pass port and host and make it persist as Singleton is not working in xbmc
+
+#Address and IP for Proxy to listen on
+HOST_NAME = '127.0.0.1'
+#HOST_NAME = 'localhost'
+PORT_NUMBER = 45550 ##move this somewhere which could be configured by UI
 
 
 if __name__ == '__main__':  
-    file_dest = common.profile_path #todo: get everything we need to read from settings of xbmc
-    proxy.ProxyManager().start_proxy(download_folder=file_dest), #more param to come
+    file_dest = common.profile_path #replace this line if you want to be specific about the download folder
+    print file_dest
+    proxy.ProxyManager().start_proxy(port=PORT_NUMBER, host_name=HOST_NAME,download_folder=file_dest), #more param to come
 

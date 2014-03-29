@@ -408,8 +408,8 @@ class ProxyHelper():
         return True # TODO, we need to restart the server, perhaps with different port? 
     
     def print_debug(self):
-        dm =axel.AxelDownloadManager()
-        print dm.downloads
+        #ProxyManager()
+        print 'debug'#dm.downloads
 
 
 
@@ -418,6 +418,13 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         self.runningthread=None#current downloads that happening
         self.host_name=HOST_NAME
         self.port=PORT_NUMBER
+        self.RunningUnderXBMC=False
+        try:
+            import xbmc
+            self.RunningUnderXBMC=True
+        except:
+            print 'not rnning under RunningUnderXBMC'
+            pass
 
     def is_running(self):
         if self.runningthread:
@@ -437,7 +444,13 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
     
     def restart_proxy(self,download_folder='',port=0, host_name=''):#todo: use download_folder and other parameters
         print 'restart it it' #todo kill the thread and call start_proxy
-    
+
+    def abort_requested(self):
+        if self.RunningUnderXBMC:
+            import xbmc
+            return xbmc.abortRequested
+        else:
+            return False #TODO: find a better way to get this terminated        
     
     def start_proxy_internal(self,download_folder,port,host_name):#todo: use download_folder and other parameters
 
@@ -448,7 +461,11 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         myhandler.protocol_version = "HTTP/1.1"
         httpd = server_class((host_name, port), myhandler)
         print "AxelProxy Downloader Starting - %s:%s" % (host_name, port)
+        print 'Press CTL break to stop.....'
         while(True):
             httpd.handle_request()
+            if self.abort_requested(): 
+                print 'breaking..........................'
+                break
         httpd.server_close()
         print "AxelProxy Downloader Stopping %s:%s" % (host_name, port)

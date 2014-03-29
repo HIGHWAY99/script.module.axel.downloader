@@ -183,7 +183,7 @@ class AxelDownloader:
         self.terminated=False
         self.fileLen=0
         self.filename =""
-        #common.addon.log('Axel Downloader Intitialized')# not an xbmc but rather python downloader
+        common.log('Axel Downloader Intitialized')# not an xbmc but rather python downloader
 
     def get_video_chunk(self,start_byte, timeout, chunkSize =1024):
 
@@ -354,7 +354,7 @@ class AxelDownloader:
             data = urllib2.urlopen(request)
             content_length = data.info()['Content-Length']
         except urllib2.URLError, e:
-            #common.addon.log_error('http connection error attempting to retreive file size: %s' % str(e))
+            #common.log_error('http connection error attempting to retreive file size: %s' % str(e))
             print 'http connection error attempting to retreive file size: %s' % str(e)
             return False
   
@@ -385,7 +385,7 @@ class AxelDownloader:
                 #print 'trying to get the first chunk'
 
                 #Write downloaded blocks to file
-                common.addon.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
+                common.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
                 
                 out_fd = open(out_file, "r+b")      
                 out_fd.seek(start_block, 0)
@@ -399,7 +399,7 @@ class AxelDownloader:
 
             except Exception, e:
               
-                common.addon.log_error('Failed writing block #%d :'  % (block_num, e))        
+                common.log_error('Failed writing block #%d :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
                 self.resultQ.task_done()
@@ -421,7 +421,7 @@ class AxelDownloader:
         #Retreive file size
         remaining = int(self.__get_file_size(file_link))
         self.fileLen= remaining
-        common.addon.log('Retrieved File Size: %d' % remaining, 2) 
+        common.log('Retrieved File Size: %d' % remaining, 2) 
              
         # Split file size into chunks
         # Add each chunk to a queue spot to be downloaded individually
@@ -463,7 +463,7 @@ class AxelDownloader:
             file_name (str): name of saved file - name will be pulled from file_link if not supplied
         ''' 
 
-        common.addon.log('In Download ...', 2)
+        common.log('In Download ...', 2)
         if not file_dest:
             file_dest = common.profile_path
                
@@ -478,7 +478,7 @@ class AxelDownloader:
         self.fileFullPath=out_file
         self.filename = file_name
         
-        common.addon.log('Worker threads processing', 2)
+        common.log('Worker threads processing', 2)
 
         self.isAllowed.acquire();
         self.__build_workq(file_link) 
@@ -491,19 +491,19 @@ class AxelDownloader:
             t.caller = self
             self.currentThreads.append([t,keepProcessing])
             t.start()
-        common.addon.log('Worker threads initialized', 2)
+        common.log('Worker threads initialized', 2)
         
         # Save downloaded chunks to file as they enter the resultQ
         # Put process into it's own thread
         st = threading.Thread(target=self.__save_file, args = (out_file, ))
         st.start()
 
-        common.addon.log('Result thread initialized')            
+        common.log('Result thread initialized')            
         
         #Build workQ items
 
         self.isAllowed.release()
-        common.addon.log('Worker Queue Built', 2) 
+        common.log('Worker Queue Built', 2) 
         self.started=True  
         # Wait for the queues to finish - join to close all threads when done
         while True:
@@ -524,13 +524,13 @@ class AxelDownloader:
             print 'now final join'
             #self.workQ.join()#timeout# This freezes, since we are here and everything has been processed ..
             print 'resultQ', self.resultQ.unfinished_tasks
-            common.addon.log('Worker Queue successfully joined', 2)
+            common.log('Worker Queue successfully joined', 2)
             if self.resultQ.unfinished_tasks:
                 print 'there are still some unfinsihed tasks??'
                 time.sleep(6)#give time to results to finish.
             if not self.resultQ.unfinished_tasks:
                 self.resultQ.join()
-                common.addon.log('Result Queue successfully joined', 2)
+                common.log('Result Queue successfully joined', 2)
             else:
                 print 'something wrong, tasks are finished but results are not in,ignoring'
             self.completed=True
@@ -605,7 +605,7 @@ class DownloadQueueProcessor(threading.Thread):
                 #self.keepProcessing.release()
                 print 'end of thread................'
                 return
-            #common.addon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
+            #common.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             if block_num==-1:
                 time.sleep(1)
@@ -618,12 +618,12 @@ class DownloadQueueProcessor(threading.Thread):
             #Check result status            
             if result == True:
                 #Tell queue that this task is done
-                #common.addon.log('Worker Queue #: %d downloading finished' % block_num, 2)
+                #common.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
                 #Mark queue task as done
                 
                 
-                #common.addon.log('Adding to result Queue #: %d' % block_num, 2)
+                #common.log('Adding to result Queue #: %d' % block_num, 2)
                 self.caller.resultQ.put([block_num, start,length, chunkData])
                 self.caller.workQ.task_done()
                 
@@ -635,7 +635,7 @@ class DownloadQueueProcessor(threading.Thread):
             #503 - Likely too many connection attempts
             elif result == "503":
 
-                common.addon.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
+                common.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
                 
                 #isAllowed.acquire();
                 #Mark queue task as done
@@ -652,7 +652,7 @@ class DownloadQueueProcessor(threading.Thread):
                 self.caller.workQ.task_done()
             
                 #Put chunk back into workQ
-                common.addon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
+                common.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
             self.keepProcessing.release()
@@ -679,7 +679,7 @@ class DownloadQueueProcessor(threading.Thread):
             try:
                 data = urllib2.urlopen(request)
             except urllib2.URLError, e:
-                common.addon.log_error("Connection failed: %s" % e)
+                common.log_error("Connection failed: %s" % e)
                 return str(e.code),""               
             else:
                 break
@@ -706,18 +706,18 @@ class DownloadQueueProcessor(threading.Thread):
                 #print 'got data' ,dataLen
                 if dataLen == 0:
                     print 'zeroooooooooooooooooooooooooo'
-                    common.addon.log("Connection: 0 sized block fetched. Retrying.", 0)
+                    common.log("Connection: 0 sized block fetched. Retrying.", 0)
                     return "no_block",""
                 #if len(data_block) != fetch_size:
                 #    print 'mismatche.............................'
-                #    common.addon.log("Connection: len(data_block) != length. Retrying.", 0)
+                #    common.log("Connection: len(data_block) != length. Retrying.", 0)
                 #    return "mismatch_block",""
 
             except socket.timeout, s:
-                common.addon.log_error("Connection timed out with msg: %s" % s)
+                common.log_error("Connection timed out with msg: %s" % s)
                 return "timeout",""
             except Exception, e:
-                common.addon.log_error("Error occured retreiving data: %s" % e)
+                common.log_error("Error occured retreiving data: %s" % e)
                 return "data_error",""
 
             #remaining_blocks -= fetch_size
