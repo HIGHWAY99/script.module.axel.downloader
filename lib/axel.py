@@ -66,8 +66,9 @@ class AxelDownloadManager(Singleton):
                         #print 'time of chunk',downloader.time_of_chunk
                         #print  downloader.keep_file    ,downloader.started 
                         #print 'downloader.clients',downloader.clients
-                        if downloader.download_mode==1 and downloader.started and not downloader.keep_file:#this is streaming
-                            if downloader.clients==0:# (datetime.datetime.now()-downloader.time_of_chunk).seconds>wait_time:
+                        
+                        if downloader.download_mode==1 and downloader.started and not downloader.keep_file:#this is streaming and file is not to be saved
+                            if downloader.clients==0 and 1==2:# stop this as XBMX should tell us, todo Put sometime limit (datetime.datetime.now()-downloader.time_of_chunk).seconds>wait_time:
                                 print 'found stopped stream',downloader_name
                                 to_delete.append(downloader_name)
                         if downloader.download_mode==2 and downloader.completed: #Todo: move to history so that it could be viewed etc
@@ -85,34 +86,34 @@ class AxelDownloadManager(Singleton):
         return  self.downloads
         
     #file_link, file_dest='', file_name='',start_byte=0
-    def start_downloading(self,file_link, file_dest, file_name, start_byte,download_mode ,keep_file,connections):
-        downloader=self.current_downloader(file_name)
+    def start_downloading(self,download_id,file_link, file_dest, file_name, start_byte,download_mode ,keep_file,connections):
+        downloader=self.current_downloader(download_id)
         if downloader: #there is a download going
                 #should we throw error or reuse that? probably filename is not unique? TODO
             downloader.clients+=1;
             print 'downloader already exists'
         else:
             downloader = AxelDownloader() # store in the same variable
-            dt = threading.Thread(target=downloader.download, args = (file_link, file_dest, file_name, start_byte))
+            dt = threading.Thread(target=downloader.download, args = (download_id,file_link, file_dest, file_name, start_byte))
             print 'Starting downloader '
             dt.start()
             time.sleep(5)# todo. better handeling
             #store the currentdownload
-            print 'downloader started',file_name
-            self.store_downloader(file_name,downloader) #we better create a uniquekey based on url etc
+            print 'downloader started',file_name,download_id
+            self.store_downloader(download_id,downloader) #we better create a uniquekey based on url etc
 
         return downloader
 
-    def stop_downloader(self,name):
+    def stop_downloader(self,download_id):
         try:
-            downloader=self.current_downloader(name)
+            downloader=self.current_downloader(download_id)
             #print 'name',name
             if downloader: 
                 #print 'terminating1'
                 downloader.terminate(True);
                  
                 #print 'terminating2'
-                del self.downloads[name]
+                del self.downloads[download_id]
                 #print 'terminating3'
                 return True
             else:
@@ -122,17 +123,17 @@ class AxelDownloadManager(Singleton):
             print 'Failed in stop_downloader  #%s :'%e 
             return False
             
-    def store_downloader(self,name,downloader):
+    def store_downloader(self,download_id,downloader):
         try:
-            self.downloads[name]=downloader
+            self.downloads[download_id]=downloader
             return True
         except Exception, e:
             print 'err  in store_downloader %s'%e
             return False
             
-    def current_downloader(self,name):
+    def current_downloader(self,download_id):
         try:
-            return self.downloads[name]
+            return self.downloads[download_id]
         except:
             return None
             
@@ -145,7 +146,7 @@ class AxelDownloader:
         - 
     '''  
 
-    def __init__(self, num_connections=2, chunk_size=1024*1024, keep_file=False, download_mode=1):#2000000
+    def __init__(self, num_connections=2, chunk_size=1024*500, keep_file=False, download_mode=1):#2000000
         '''
         Class init      
         
@@ -284,11 +285,19 @@ class AxelDownloader:
         #read from file, from sIndex to eIndex
  
     def freeze_all_threads(self, freeze):
-        for t,c in self.currentThreads:
-            if freeze:
-                c.acquire()
-            else:
-                c.release()
+        try:
+            for t,c in self.currentThreads:
+                if freeze:
+                    c.acquire()
+                else:
+                    c.release()
+        except: pass
+                
+    def freeze_all_but_one(self):
+        self.freeze_all_threads();
+        firstThread = self.currentThreads[0];
+        c.release();
+                
     def repriotize_queue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
         print 'stop everyone, repriotize_queue',startingByte
         self.stopEveryone=True
@@ -399,7 +408,7 @@ class AxelDownloader:
 
             except Exception, e:
               
-                common.log_error('Failed writing block #%d :'  % (block_num, e))        
+                common.log('Failed writing block #%d :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
                 self.resultQ.task_done()
@@ -452,7 +461,7 @@ class AxelDownloader:
         self.total_chunks=i
     
 
-    def download(self, file_link, file_dest='', file_name='',start_byte=0):
+    def download(self, download_id, file_link, file_dest='', file_name='',start_byte=0):
         '''
         Main function to perform download
               
@@ -477,11 +486,12 @@ class AxelDownloader:
         os.close(out_fd)
         self.fileFullPath=out_file
         self.filename = file_name
-        
+        self.download_id = download_id
         common.log('Worker threads processing', 2)
 
         self.isAllowed.acquire();
         self.__build_workq(file_link) 
+        
         
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
@@ -679,7 +689,7 @@ class DownloadQueueProcessor(threading.Thread):
             try:
                 data = urllib2.urlopen(request)
             except urllib2.URLError, e:
-                common.log_error("Connection failed: %s" % e)
+                common.log("Connection failed: %s" % e)
                 return str(e.code),""               
             else:
                 break
@@ -714,10 +724,10 @@ class DownloadQueueProcessor(threading.Thread):
                 #    return "mismatch_block",""
 
             except socket.timeout, s:
-                common.log_error("Connection timed out with msg: %s" % s)
+                common.log("Connection timed out with msg: %s" % s)
                 return "timeout",""
             except Exception, e:
-                common.log_error("Error occured retreiving data: %s" % e)
+                common.log("Error occured retreiving data: %s" % e)
                 return "data_error",""
 
             #remaining_blocks -= fetch_size

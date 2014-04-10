@@ -36,6 +36,8 @@ import axel
 import common #todo: remove this and its usage from this class
 from common import Singleton
 import urlparse
+import uuid
+
 
 #Address and IP for Proxy to listen on
 HOST_NAME = '127.0.0.1'
@@ -88,9 +90,10 @@ class MyHandler(BaseHTTPRequestHandler):
                 self.wfile.close()
                 return
             if  request_path.lower()=='stopdownload' :
-                file_stop=re.findall( '=(.*)',self.path[1:])[0]
-                print 'Get stop download Call!',request_path,file_stop
-                self.respondStopDownload(file_stop);
+                #file_stop=re.findall( '=(.*)',self.path[1:])[0]
+                download_id=re.findall( '=(.*)',self.path[1:])[0]
+                print 'Get stop download Call!',request_path,download_id
+                self.respondStopDownload(download_id);
                 self.wfile.close()
                 return
 
@@ -104,12 +107,12 @@ class MyHandler(BaseHTTPRequestHandler):
             #Expecting url to be sent in base64 encoded - saves any url issues with XBMC
             #(file_url,file_name)=self.decode_B64_url(request_path)
 
-            (file_url,file_name,download_mode ,keep_file,connections)=self.decode_url(request_path)
+            (download_id,file_url,file_name,download_mode ,keep_file,connections)=self.decode_url(request_path)
             print file_url
 
 
             #Send file request
-            self.handle_send_request(file_url, file_name, requested_range,download_mode ,keep_file,connections)
+            self.handle_send_request(download_id,file_url, file_name, requested_range,download_mode ,keep_file,connections)
         
 
 
@@ -125,20 +128,20 @@ class MyHandler(BaseHTTPRequestHandler):
         self.wfile.close()
         return
 
-    def respondStopDownload(self,filename):
+    def respondStopDownload(self,download_id):
         #response='Stopping',filename#self.getStatus()
-        response=self.stopDownloading(filename)
+        response=self.stopDownloading(download_id)
         if response==True:
             response="Termination has been Queued!"
         else:
             response="Remove Failed!"
         self.sendHTML(response)
 
-    def stopDownloading(self,filename):
-        print 'stopping',filename
+    def stopDownloading(self,download_id):
+        print 'stopping',download_id
         import axel
         downloader_manager=axel.AxelDownloadManager()
-        return downloader_manager.stop_downloader(filename)
+        return downloader_manager.stop_downloader(download_id)
 
 
     def respondStatus(self):
@@ -147,13 +150,18 @@ class MyHandler(BaseHTTPRequestHandler):
         
     def sendHTML(self,html):
         response=html
-        print response
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.send_header('Content-length', len(response))
-        self.end_headers()
-        self.wfile.write(response)
-        self.wfile.flush()
+        #print response
+        try:
+            self.send_response(200)
+        
+            self.send_header('Content-type', 'text/html')
+            self.send_header('Content-length', len(response))
+            self.end_headers()
+        
+            self.wfile.write(response)
+            self.wfile.flush()
+        except: 
+            traceback.print_exc() #this is giving greif every second time
 
     def getStatus(self):
         import axel
@@ -179,10 +187,11 @@ class MyHandler(BaseHTTPRequestHandler):
                     downloader=downloaders[downloader_name]
                     file_size = downloader.fileLen
                     file_name = downloader.filename
+                    download_id = downloader.download_id
                     
                     
                     htmlText+= "<TR>"
-                    htmlText+= "<TD><a href=\"http://127.0.0.1:" +str(PORT_NUMBER)+ "/StopDownload?fname="+ file_name + "\">Stop</a></TD>"
+                    htmlText+= "<TD><a href=\"http://127.0.0.1:" +str(PORT_NUMBER)+ "/StopDownload?download_id="+ download_id + "\">Stop</a></TD>"
                     htmlText+= "<TD>"+ file_name+"</TD>"
                     htmlText+= "<TD>"+ str(int(file_size)/1024/1024 )+"</TD>"
                     htmlText+= "<TD>"+ str(downloader.completed) +"</TD>"
@@ -220,13 +229,13 @@ class MyHandler(BaseHTTPRequestHandler):
             print 'Exception creating status: %s' % e
             return 'Error in status' #connection drop
     
-    def handle_send_request(self, file_url, file_name, s_range,download_mode ,keep_file,connections):
+    def handle_send_request(self,download_id, file_url, file_name, s_range,download_mode ,keep_file,connections):
 
         file_dest = common.profile_path #TODO: this should be python not xbmc proxy.
         rtype="video/mp4" #just as default
 
 
-        file_size,file_url,rtype=self.get_file_size(file_url)# get the url again, incase there is a redirector
+        file_size,file_url,rtype=self.get_file_size(file_url)# TODO: get the url again, incase there is a redirector
         file_size=int(file_size)
         print 'file size',file_size
         (srange, erange) = self.get_range_request(s_range, file_size)
@@ -243,7 +252,7 @@ class MyHandler(BaseHTTPRequestHandler):
         if download_mode==2: #if its download only then do not stream
             import axel
             downloadManager = axel.AxelDownloadManager() #singleton
-            downloader = downloadManager.start_downloading(file_url, file_dest, file_name, 0,download_mode ,True,connections) #either create downloader or return exiting one
+            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, 0,download_mode ,True,connections) #either create downloader or return exiting one
             self.sendHTML('Download Started')
         elif s_range and not s_range=="bytes=0-0": #we have to stream?
             self.send_response(206)
@@ -252,7 +261,7 @@ class MyHandler(BaseHTTPRequestHandler):
             self.send_http_headers(file_name, rtype, content_size , etag)
             import axel
             downloadManager = axel.AxelDownloadManager() #singleton
-            downloader = downloadManager.start_downloading(file_url, file_dest, file_name, srange,download_mode ,keep_file,connections) #either create downloader or return exiting one
+            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, srange,download_mode ,keep_file,connections) #either create downloader or return exiting one
 
             self.keep_sending_video(self.wfile,downloader,srange) #TODO create a streamer class and let it do the job #start sending video, this will never terminate, unless we are done sending
             downloader.clients-=1
@@ -358,13 +367,14 @@ class MyHandler(BaseHTTPRequestHandler):
         print 'params',params # TODO read all params
         #({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections})
         received_url = params['url'][0]#
+        download_id = params['download_id'][0]#
         #received_url = base64.b64decode(received_url)
         file_name = received_url.split('/')[-1]
         file_name=file_name.split('?')[0]
         download_mode=params['downloadmode'][0]
         keep_file=params['keep_file'][0]
         connections=params['connections'][0]
-        return (received_url, file_name,download_mode ,keep_file,connections)
+        return (download_id,received_url, file_name,download_mode ,keep_file,connections)
 
 
 class Server(HTTPServer):
@@ -386,16 +396,65 @@ class Server(HTTPServer):
 
 class ThreadedHTTPServer(ThreadingMixIn, Server):
     """Handle requests in a separate thread."""
-
+    
     
 class ProxyHelper():
 
+    def playUrl(self,url,name='Name here',connections=2, keep_file=False):
+        finalUrl,download_id = self.create_proxy_url(url,connections=connections,keep_file=keep_file)
+        self.play_in_XBMC(finalUrl,name,download_id,keep_file)
+
+    def download(self,url,name='Name here',connections=2):
+        finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True)
+        self.play_in_XBMC(finalUrl,name,download_id)
+        
+    def play_in_XBMC(self,url, name,download_id,keep_file):
+        try:
+            import axelPlayer
+            import xbmcgui
+            import xbmc
+            stopPlaying=threading.Event()
+            mplayer = axelPlayer.axelPlayer()
+            mplayer.setStopEvent(stopPlaying)
+            listitem = xbmcgui.ListItem("myfile")
+            mplayer.play(url,listitem)
+            while True:
+                xbmc.log('Sleeping...')
+                xbmc.sleep(1000)
+                if stopPlaying.isSet():
+                    break;
+            # call the proxy to stop 
+            if not keep_file: #if file saving is not required then ask download to stop
+                self.stop_download(download_id)
+        except:
+            print 'failed in play_in_XBMC'
+            traceback.print_exc()
+
+     
+    def stop_download(self,download_id):
+        try:
+            url=self.get_stop_url(download_id)
+            #
+            request = urllib2.Request(url, None, http_headers)
+            data = urllib2.urlopen(request)
+            print 'STOP request sent'
+        except:
+            print 'failed in stop_download'
+            traceback.print_exc()
+
+    def get_stop_url(self,download_id): 
+        newurl="StopDownload?download_id="+str(download_id)
+        pm=ProxyManager()
+        link = 'http://'+self.get_hostname()+(':%s/'%self.get_port()) + newurl
+        return link
+        
     def create_proxy_url(self,url,downloadmode=1,keep_file=False,connections=2): #todo: use in proxy#downloadmode=1 means stream. 2 means download only
-         newurl=urllib.urlencode({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections})
-         pm=ProxyManager()
-         print 'host name is',pm.host_name
-         link = 'http://'+self.get_hostname()+(':%s/'%self.get_port()) + newurl
-         return link #make a url that caller then call load into player
+        download_id=str(uuid.uuid4())
+        newurl=urllib.urlencode({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections,'download_id':download_id})
+        pm=ProxyManager()
+        print 'host name is',pm.host_name
+        link = 'http://'+self.get_hostname()+(':%s/'%self.get_port()) + newurl
+        return (link,download_id) #make a url that caller then call load into player
         
     def get_port(self):
         return ProxyManager().port # TODO, get some sort of settings etc 
@@ -447,7 +506,8 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
         server_class = ThreadedHTTPServer
 
         myhandler=MyHandler
-        myhandler.protocol_version = "HTTP/1.1"
+        #myhandler.protocol_version = "HTTP/1.1"
+        myhandler.protocol_version = "HTTP/1.0"
         httpd = server_class((host_name, port), myhandler)
         print "AxelProxy Downloader Starting - %s:%s" % (host_name, port)
         print 'Press CTL break to stop.....'
