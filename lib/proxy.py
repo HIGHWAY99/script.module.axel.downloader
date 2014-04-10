@@ -89,6 +89,10 @@ class MyHandler(BaseHTTPRequestHandler):
                 self.respondStatus();
                 self.wfile.close()
                 return
+            if request_path.lower()=="favicon.ico":
+                print 'dont have no icone here, may be in future'
+                self.wfile.close()
+                return
             if  request_path.lower()=='stopdownload' :
                 #file_stop=re.findall( '=(.*)',self.path[1:])[0]
                 download_id=re.findall( '=(.*)',self.path[1:])[0]
@@ -248,13 +252,17 @@ class MyHandler(BaseHTTPRequestHandler):
         videoContents=""
         # Do we have to send a normal response or a range response?
         portionLen=0
-        
-        if download_mode==2: #if its download only then do not stream
+        print 'download_mode',download_mode
+        if str(download_mode)=='2': #if its download only then do not stream
+            print 'got download request'
             import axel
             downloadManager = axel.AxelDownloadManager() #singleton
             downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, 0,download_mode ,True,connections) #either create downloader or return exiting one
+            print 'download started'
             self.sendHTML('Download Started')
+            return
         elif s_range and not s_range=="bytes=0-0": #we have to stream?
+            print 'streaming request'
             self.send_response(206)
             crange="bytes "+str(srange)+"-" +str(int(content_size-1))+"/"+str(content_size)#recalculate crange based on srange, portionLen and content_size 
             self.send_header("Content-Range",crange)
@@ -406,7 +414,8 @@ class ProxyHelper():
 
     def download(self,url,name='Name here',connections=2):
         finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True)
-        self.play_in_XBMC(finalUrl,name,download_id)
+        self.call_page(finalUrl)
+        return download_id
         
     def play_in_XBMC(self,url, name,download_id,keep_file):
         try:
@@ -434,14 +443,20 @@ class ProxyHelper():
     def stop_download(self,download_id):
         try:
             url=self.get_stop_url(download_id)
-            #
-            request = urllib2.Request(url, None, http_headers)
-            data = urllib2.urlopen(request)
-            print 'STOP request sent'
+            self.call_page(url)
+            print 'stop request sent'
         except:
             print 'failed in stop_download'
             traceback.print_exc()
-
+            
+    def call_page(self,url): #reuse this to return data
+        try:
+            request = urllib2.Request(url, None, http_headers)
+            data = urllib2.urlopen(request)
+        except:
+            print 'failed in call_page'
+            traceback.print_exc()
+            
     def get_stop_url(self,download_id): 
         newurl="StopDownload?download_id="+str(download_id)
         pm=ProxyManager()
