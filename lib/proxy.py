@@ -174,7 +174,7 @@ class MyHandler(BaseHTTPRequestHandler):
         try:
             if len(downloaders):
                 htmlText="<html><head></head><body>"
-                htmlText+="<table width=100%>"
+                htmlText+="<table width=100% style=\"table-layout:fixed\">"
                 htmlText+= "<TR>"
                 htmlText+= "<TD>Action</TD>"
                 htmlText+= "<TD>File Name </TD>"
@@ -207,7 +207,7 @@ class MyHandler(BaseHTTPRequestHandler):
                     htmlText+= "</TR>"
                     htmlText+= "<TR>"
                     htmlText+= "<TD colspan=9>"
-                    htmlText+= "<table wdith=100%><TR>"
+                    htmlText+= "<table wdith=100% cellpadding=\"0\" cellspacing=\"0\" style=\"table-layout:fixed\"><TR>"
                     L=downloader.completed_work()
                     #print L
                     
@@ -217,9 +217,9 @@ class MyHandler(BaseHTTPRequestHandler):
                         
                         if len(L):
                             if  len([b for b,s in enumerate(L) if s[1] == s_number])>0:
-                                htmlText+= "<TD bgcolor=green width=" + cellW + "%>|</TD>"
+                                htmlText+= "<TD bgcolor=green width=" + cellW + "%>&nbsp;</TD>"
                             else:
-                                htmlText+= "<TD bgcolor=red width=" + cellW + "%>|</TD>"
+                                htmlText+= "<TD bgcolor=red width=" + cellW + "%>&nbsp;</TD>"
                     htmlText+= "</TR></table>"
                     htmlText+= "</TD></TR>"
 
