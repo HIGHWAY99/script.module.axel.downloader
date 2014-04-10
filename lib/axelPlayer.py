@@ -7,7 +7,7 @@ class axelPlayer (xbmc.Player):
     def play(self, url, listitem):
         print 'Now im playing... %s' % url
         self.stopPlaying.clear()
-        xbmc.Player(xbmc.PLAYER_CORE_DVDPLAYER).play(url, listitem)
+        xbmc.Player(xbmc.PLAYER_CORE_AUTO).play(url, listitem)
     def onPlayBackEnded( self ):
         # Will be called when xbmc stops playing a file
         print "seting event in onPlayBackEnded " 
