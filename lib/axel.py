@@ -32,10 +32,10 @@ import threading
 import urllib2
 import socket
 import os
-import multiprocessing
+#import multiprocessing
 #from downloader import Downloader
-import common #todo: remove this to make xbmc independent
-from common import Singleton
+import axelcommon #todo: remove this to make xbmc independent
+from axelcommon import Singleton
 import time
 import datetime
 import traceback
@@ -158,8 +158,8 @@ class AxelDownloader:
         self.resultQ = Queue.PriorityQueue()
         self.currentThreads=[]
         self.completedWork=[]
-        self.isAllowed = multiprocessing.Condition()
-        self.saveFileLock = multiprocessing.Condition()
+        self.isAllowed = threading.Condition()
+        self.saveFileLock = threading.Condition()
         self.stopEveryone=False;     
         self.clients=1
         #Class variables
@@ -184,7 +184,7 @@ class AxelDownloader:
         self.terminated=False
         self.fileLen=0
         self.filename =""
-        common.log('Axel Downloader Intitialized')# not an xbmc but rather python downloader
+        axelcommon.log('Axel Downloader Intitialized')# not an xbmc but rather python downloader
 
     def get_video_chunk(self,start_byte, timeout, chunkSize =1024):
 
@@ -363,7 +363,7 @@ class AxelDownloader:
             data = urllib2.urlopen(request)
             content_length = data.info()['Content-Length']
         except urllib2.URLError, e:
-            #common.log_error('http connection error attempting to retreive file size: %s' % str(e))
+            #axelcommon.log_error('http connection error attempting to retreive file size: %s' % str(e))
             print 'http connection error attempting to retreive file size: %s' % str(e)
             return False
   
@@ -394,7 +394,7 @@ class AxelDownloader:
                 #print 'trying to get the first chunk'
 
                 #Write downloaded blocks to file
-                common.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
+                axelcommon.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
                 
                 out_fd = open(out_file, "r+b")      
                 out_fd.seek(start_block, 0)
@@ -408,7 +408,7 @@ class AxelDownloader:
 
             except Exception, e:
               
-                common.log('Failed writing block #%d :'  % (block_num, e))        
+                axelcommon.log('Failed writing block #%d :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
                 self.resultQ.task_done()
@@ -430,7 +430,7 @@ class AxelDownloader:
         #Retreive file size
         remaining = int(self.__get_file_size(file_link))
         self.fileLen= remaining
-        common.log('Retrieved File Size: %d' % remaining, 2) 
+        axelcommon.log('Retrieved File Size: %d' % remaining, 2) 
              
         # Split file size into chunks
         # Add each chunk to a queue spot to be downloaded individually
@@ -472,9 +472,9 @@ class AxelDownloader:
             file_name (str): name of saved file - name will be pulled from file_link if not supplied
         ''' 
 
-        common.log('In Download ...', 2)
+        axelcommon.log('In Download ...', 2)
         if not file_dest:
-            file_dest = common.profile_path
+            file_dest = axelcommon.profile_path
                
         # Create output file with a .part extension to indicate partial download
         if not os.path.exists(file_dest):
@@ -487,7 +487,7 @@ class AxelDownloader:
         self.fileFullPath=out_file
         self.filename = file_name
         self.download_id = download_id
-        common.log('Worker threads processing', 2)
+        axelcommon.log('Worker threads processing', 2)
 
         self.isAllowed.acquire();
         self.__build_workq(file_link) 
@@ -495,25 +495,25 @@ class AxelDownloader:
         
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
-            keepProcessing = multiprocessing.Condition()
+            keepProcessing = threading.Condition()
             t = DownloadQueueProcessor()
             t.setKeepProcessing(keepProcessing)
             t.caller = self
             self.currentThreads.append([t,keepProcessing])
             t.start()
-        common.log('Worker threads initialized', 2)
+        axelcommon.log('Worker threads initialized', 2)
         
         # Save downloaded chunks to file as they enter the resultQ
         # Put process into it's own thread
         st = threading.Thread(target=self.__save_file, args = (out_file, ))
         st.start()
 
-        common.log('Result thread initialized')            
+        axelcommon.log('Result thread initialized')            
         
         #Build workQ items
 
         self.isAllowed.release()
-        common.log('Worker Queue Built', 2) 
+        axelcommon.log('Worker Queue Built', 2) 
         self.started=True  
         # Wait for the queues to finish - join to close all threads when done
         while True:
@@ -534,13 +534,13 @@ class AxelDownloader:
             print 'now final join'
             #self.workQ.join()#timeout# This freezes, since we are here and everything has been processed ..
             print 'resultQ', self.resultQ.unfinished_tasks
-            common.log('Worker Queue successfully joined', 2)
+            axelcommon.log('Worker Queue successfully joined', 2)
             if self.resultQ.unfinished_tasks:
                 print 'there are still some unfinsihed tasks??'
                 time.sleep(6)#give time to results to finish.
             if not self.resultQ.unfinished_tasks:
                 self.resultQ.join()
-                common.log('Result Queue successfully joined', 2)
+                axelcommon.log('Result Queue successfully joined', 2)
             else:
                 print 'something wrong, tasks are finished but results are not in,ignoring'
             self.completed=True
@@ -615,7 +615,7 @@ class DownloadQueueProcessor(threading.Thread):
                 #self.keepProcessing.release()
                 print 'end of thread................'
                 return
-            #common.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
+            #axelcommon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             if block_num==-1:
                 time.sleep(1)
@@ -628,12 +628,12 @@ class DownloadQueueProcessor(threading.Thread):
             #Check result status            
             if result == True:
                 #Tell queue that this task is done
-                #common.log('Worker Queue #: %d downloading finished' % block_num, 2)
+                #axelcommon.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
                 #Mark queue task as done
                 
                 
-                #common.log('Adding to result Queue #: %d' % block_num, 2)
+                #axelcommon.log('Adding to result Queue #: %d' % block_num, 2)
                 self.caller.resultQ.put([block_num, start,length, chunkData])
                 self.caller.workQ.task_done()
                 
@@ -645,7 +645,7 @@ class DownloadQueueProcessor(threading.Thread):
             #503 - Likely too many connection attempts
             elif result == "503":
 
-                common.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
+                axelcommon.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
                 
                 #isAllowed.acquire();
                 #Mark queue task as done
@@ -662,7 +662,7 @@ class DownloadQueueProcessor(threading.Thread):
                 self.caller.workQ.task_done()
             
                 #Put chunk back into workQ
-                common.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
+                axelcommon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
             self.keepProcessing.release()
@@ -689,7 +689,7 @@ class DownloadQueueProcessor(threading.Thread):
             try:
                 data = urllib2.urlopen(request)
             except urllib2.URLError, e:
-                common.log("Connection failed: %s" % e)
+                axelcommon.log("Connection failed: %s" % e)
                 return str(e.code),""               
             else:
                 break
@@ -716,18 +716,18 @@ class DownloadQueueProcessor(threading.Thread):
                 #print 'got data' ,dataLen
                 if dataLen == 0:
                     print 'zeroooooooooooooooooooooooooo'
-                    common.log("Connection: 0 sized block fetched. Retrying.", 0)
+                    axelcommon.log("Connection: 0 sized block fetched. Retrying.", 0)
                     return "no_block",""
                 #if len(data_block) != fetch_size:
                 #    print 'mismatche.............................'
-                #    common.log("Connection: len(data_block) != length. Retrying.", 0)
+                #    axelcommon.log("Connection: len(data_block) != length. Retrying.", 0)
                 #    return "mismatch_block",""
 
             except socket.timeout, s:
-                common.log("Connection timed out with msg: %s" % s)
+                axelcommon.log("Connection timed out with msg: %s" % s)
                 return "timeout",""
             except Exception, e:
-                common.log("Error occured retreiving data: %s" % e)
+                axelcommon.log("Error occured retreiving data: %s" % e)
                 return "data_error",""
 
             #remaining_blocks -= fetch_size

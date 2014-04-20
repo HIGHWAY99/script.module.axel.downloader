@@ -31,10 +31,10 @@ import time
 import threading
 from SocketServer import ThreadingMixIn
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
-import multiprocessing
+#import multiprocessing
 import axel
-import common #todo: remove this and its usage from this class
-from common import Singleton
+import axelcommon #todo: remove this and its usage from this class
+from axelcommon import Singleton
 import urlparse
 import uuid
 
@@ -235,7 +235,7 @@ class MyHandler(BaseHTTPRequestHandler):
     
     def handle_send_request(self,download_id, file_url, file_name, s_range,download_mode ,keep_file,connections):
 
-        file_dest = common.profile_path #TODO: this should be python not xbmc proxy.
+        file_dest = axelcommon.profile_path #TODO: this should be python not xbmc proxy.
         rtype="video/mp4" #just as default
 
 
