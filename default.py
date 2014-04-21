@@ -19,16 +19,16 @@
 '''
 
 
-import common
-import proxy
+import axelcommon
+import axelproxy
 # This is xbmc  class. TODO: read the settings here and send it to proxy for port etc
 #TODO: check if start at launch setting is configured!
 #todo find a better way to pass port and host and make it persist as Singleton is not working in xbmc
 import xbmc 
 
 if __name__ == '__main__':  
-    file_dest = common.profile_path #todo: get everything we need to read from settings of xbmc
-    pm = proxy.ProxyManager()
+    file_dest = axelcommon.profile_path #todo: get everything we need to read from settings of xbmc
+    pm = axelproxy.ProxyManager()
     pm.start_proxy(download_folder=file_dest), #more param to come
     while (not xbmc.abortRequested):
         xbmc.sleep(1)

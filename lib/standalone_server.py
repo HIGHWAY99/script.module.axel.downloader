@@ -19,8 +19,8 @@
 '''
 
 
-import common
-import proxy
+import axelcommon
+import axelproxy
 # This is xbmc linked class. TODO: read the settings here and send it to proxy for port etc
 #TODO: check if start at launch setting is configured!
 
@@ -31,7 +31,7 @@ PORT_NUMBER = 45550 ##move this somewhere which could be configured by UI
 
 
 if __name__ == '__main__':  
-    file_dest = common.profile_path #replace this line if you want to be specific about the download folder
+    file_dest = axelcommon.profile_path #replace this line if you want to be specific about the download folder
     print file_dest
-    proxy.ProxyManager().start_proxy(port=PORT_NUMBER, host_name=HOST_NAME,download_folder=file_dest), #more param to come
+    axelproxy.ProxyManager().start_proxy(port=PORT_NUMBER, host_name=HOST_NAME,download_folder=file_dest), #more param to come
 
