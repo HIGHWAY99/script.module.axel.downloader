@@ -93,7 +93,7 @@ class AxelDownloadManager(Singleton):
             downloader.clients+=1;
             print 'downloader already exists'
         else:
-            downloader = AxelDownloader() # store in the same variable
+            downloader = AxelDownloader(num_connections=connections,keep_file=keep_file,download_mode=download_mode) # store in the same variable
             dt = threading.Thread(target=downloader.download, args = (download_id,file_link, file_dest, file_name, start_byte))
             print 'Starting downloader '
             dt.start()
@@ -216,11 +216,11 @@ class AxelDownloader:
     def completed_work(self):
         return self.completedWork
  
-    def terminate(self, fromStreamer=False):
+    def terminate(self, fromXBMCPlayer=False):
         self.stopProcessing=True
         for t,c in self.currentThreads:
             t.terminate()
-        self.cleanup(fromStreamer)
+        self.cleanup(fromXBMCPlayer)
 
     def is_chunk_downloaded(self, start_byte): #tell us if anything exists for given starting point
         sIndex=-1;
@@ -408,7 +408,7 @@ class AxelDownloader:
 
             except Exception, e:
               
-                axelcommon.log('Failed writing block #%d :'  % (block_num, e))        
+                axelcommon.log('Failed writing block #%d %s :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
                 self.resultQ.task_done()
@@ -473,6 +473,7 @@ class AxelDownloader:
         ''' 
 
         axelcommon.log('In Download ...', 2)
+        self.file_link=file_link
         if not file_dest:
             file_dest = axelcommon.profile_path
                
@@ -482,9 +483,11 @@ class AxelDownloader:
             
         out_file = os.path.join(file_dest, file_name)
         part_file = out_file + ".part"
-        out_fd = os.open(out_file, os.O_CREAT | os.O_WRONLY)
+        out_fd = os.open(part_file, os.O_CREAT | os.O_WRONLY)
         os.close(out_fd)
-        self.fileFullPath=out_file
+        self.fileFullPath=part_file
+        self.fileFullPathFinal=out_file
+        
         self.filename = file_name
         self.download_id = download_id
         axelcommon.log('Worker threads processing', 2)
@@ -505,7 +508,7 @@ class AxelDownloader:
         
         # Save downloaded chunks to file as they enter the resultQ
         # Put process into it's own thread
-        st = threading.Thread(target=self.__save_file, args = (out_file, ))
+        st = threading.Thread(target=self.__save_file, args = (self.fileFullPath, ))
         st.start()
 
         axelcommon.log('Result thread initialized')            
@@ -557,11 +560,28 @@ class AxelDownloader:
         #Rename file from .part to intended name
         #os.rename(part_file, out_file)
     
-    def cleanup(self, fromStreamer=False):
-        if (not fromStreamer) and self.download_mode==1:
-            return # if its not streamer and file is in streaming mode then it may be in use
+    def cleanup(self, fromXBMCPlayer=False):
+        if (not fromXBMCPlayer) and self.download_mode==1:
+            return # if its not streamer and file is in streaming mode then it may be in use due to pause etc
+        
+        print 'cleaning up',fromXBMCPlayer,self.download_mode
         if (not self.completed) or (self.download_mode==1 and not self.keep_file): # if not finished downloading or its streaming but saving not req.
             os.remove(self.fileFullPath)
+            print 'file deleted up',self.completed,self.download_mode,self.keep_file
+            return
+        #keep the file    
+        print self.fileFullPath, self.fileFullPathFinal
+        try:
+            os.rename(self.fileFullPath, self.fileFullPathFinal)
+        except: 
+            traceback.print_exc(file=sys.stdout)
+            time.sleep(5)
+            try:
+                os.rename(self.fileFullPath, self.fileFullPathFinal)
+            except:
+                traceback.print_exc(file=sys.stdout)
+            #since we are keeping the file so better rename it
+            
         
 
 

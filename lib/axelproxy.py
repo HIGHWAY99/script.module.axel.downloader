@@ -111,12 +111,12 @@ class MyHandler(BaseHTTPRequestHandler):
             #Expecting url to be sent in base64 encoded - saves any url issues with XBMC
             #(file_url,file_name)=self.decode_B64_url(request_path)
 
-            (download_id,file_url,file_name,download_mode ,keep_file,connections)=self.decode_url(request_path)
+            (download_id,file_url,file_name,download_mode ,keep_file,connections,dest_folder_path)=self.decode_url(request_path)
             print file_url
 
 
             #Send file request
-            self.handle_send_request(download_id,file_url, file_name, requested_range,download_mode ,keep_file,connections)
+            self.handle_send_request(download_id,file_url, file_name, requested_range,download_mode ,keep_file,connections,dest_folder_path)
         
 
 
@@ -207,6 +207,10 @@ class MyHandler(BaseHTTPRequestHandler):
                     htmlText+= "</TR>"
                     htmlText+= "<TR>"
                     htmlText+= "<TD colspan=9>"
+                    htmlText+=  downloader.file_link
+                    htmlText+= "</TR>"
+                    htmlText+= "<TR>"
+                    htmlText+= "<TD colspan=9>"
                     htmlText+= "<table wdith=100% cellpadding=\"0\" cellspacing=\"0\" style=\"table-layout:fixed\"><TR>"
                     L=downloader.completed_work()
                     #print L
@@ -233,9 +237,11 @@ class MyHandler(BaseHTTPRequestHandler):
             print 'Exception creating status: %s' % e
             return 'Error in status' #connection drop
     
-    def handle_send_request(self,download_id, file_url, file_name, s_range,download_mode ,keep_file,connections):
+    def handle_send_request(self,download_id, file_url, file_name, s_range,download_mode ,keep_file,connections,dest_folder_path):
 
         file_dest = axelcommon.profile_path #TODO: this should be python not xbmc proxy.
+        if not dest_folder_path=='':
+            file_dest=dest_folder_path
         rtype="video/mp4" #just as default
 
 
@@ -253,7 +259,7 @@ class MyHandler(BaseHTTPRequestHandler):
         # Do we have to send a normal response or a range response?
         portionLen=0
         print 'download_mode',download_mode
-        if str(download_mode)=='2': #if its download only then do not stream
+        if str(download_mode)==2: #if its download only then do not stream
             print 'got download request'
             import axel
             downloadManager = axel.AxelDownloadManager() #singleton
@@ -376,13 +382,58 @@ class MyHandler(BaseHTTPRequestHandler):
         #({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections})
         received_url = params['url'][0]#
         download_id = params['download_id'][0]#
+
         #received_url = base64.b64decode(received_url)
-        file_name = received_url.split('/')[-1]
-        file_name=file_name.split('?')[0]
-        download_mode=params['downloadmode'][0]
-        keep_file=params['keep_file'][0]
-        connections=params['connections'][0]
-        return (download_id,received_url, file_name,download_mode ,keep_file,connections)
+        download_id = params['download_id'][0]#
+        file_name=''
+        dest_folder_path=''
+        try:
+            file_name=params['name'][0]#
+        except: pass
+        try:
+            dest_folder_path=params['dest_folder_path'][0]#
+        except: pass
+        if file_name=='':
+            file_name=download_id
+        file_ext=''
+        if not '.' in file_name:
+            try:
+                print file_name,received_url
+                file_ext = received_url.split('/')[-1]
+                file_ext=file_ext.split('?')[0]
+                file_ext=file_ext.split('.')
+                if len(file_ext)>0:
+                    file_ext=file_ext[-1]
+                else:
+                    file_ext=''
+            except:
+                traceback.print_exc()
+                file_ext=''
+            if len(file_ext)==0: file_ext='mp4' #catchall
+            file_name+='.'+file_ext
+   
+        file_name=  file_name.replace("\\","")
+        file_name=  file_name.replace("/","")
+        file_name=  file_name.replace(":","")
+        file_name=  file_name.replace("*","")
+        file_name=  file_name.replace("?","")
+        file_name=  file_name.replace("\"","")
+        file_name=  file_name.replace("<","")
+        file_name=  file_name.replace(">","")
+        file_name=  file_name.replace("|","")
+        
+        
+                
+        #file_name+='.flv' #do we need to get the fullname?#todo see if we need to make the name nuetral to file naming conventions like : etc to remove
+
+        download_mode=int(params['downloadmode'][0])
+        keep_file=False
+        print 'keep',params['keep_file'][0].lower()
+        if params['keep_file'][0].lower()=='true':
+            keep_file=True
+        print keep_file
+        connections=int(params['connections'][0])
+        return (download_id,received_url, file_name,download_mode ,keep_file,connections,dest_folder_path)
 
 
 class Server(HTTPServer):
@@ -408,12 +459,12 @@ class ThreadedHTTPServer(ThreadingMixIn, Server):
     
 class ProxyHelper():
 
-    def playUrl(self,url,name='Name here',connections=2, keep_file=False):
-        finalUrl,download_id = self.create_proxy_url(url,connections=connections,keep_file=keep_file)
+    def playUrl(self,url,name='',connections=2, keep_file=False,dest_folder_path=''):
+        finalUrl,download_id = self.create_proxy_url(url,connections=connections,keep_file=keep_file,name=name,dest_folder_path=dest_folder_path)
         self.play_in_XBMC(finalUrl,name,download_id,keep_file)
 
-    def download(self,url,name='Name here',connections=2):
-        finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True)
+    def download(self,url,name='',connections=2,dest_path=''):
+        finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True,name=name,dest_folder_path=dest_folder_path)
         self.call_page(finalUrl)
         return download_id
         
@@ -425,7 +476,7 @@ class ProxyHelper():
             stopPlaying=threading.Event()
             mplayer = axelPlayer.axelPlayer()
             mplayer.setStopEvent(stopPlaying)
-            listitem = xbmcgui.ListItem("myfile")
+            listitem = xbmcgui.ListItem(name)
             mplayer.play(url,listitem)
             while True:
                 xbmc.log('Sleeping...')
@@ -433,8 +484,8 @@ class ProxyHelper():
                 if stopPlaying.isSet():
                     break;
             # call the proxy to stop 
-            if not keep_file: #if file saving is not required then ask download to stop
-                self.stop_download(download_id)
+            #if not keep_file: #if file saving is not required then ask download to stop
+            self.stop_download(download_id)# call it all the time, so that file could be renamed
         except:
             print 'failed in play_in_XBMC'
             traceback.print_exc()
@@ -463,11 +514,11 @@ class ProxyHelper():
         link = 'http://'+self.get_hostname()+(':%s/'%self.get_port()) + newurl
         return link
         
-    def create_proxy_url(self,url,downloadmode=1,keep_file=False,connections=2): #todo: use in proxy#downloadmode=1 means stream. 2 means download only
+    def create_proxy_url(self,url,downloadmode=1,keep_file=False,connections=2, name='', dest_folder_path=''): #todo: use in proxy#downloadmode=1 means stream. 2 means download only
         download_id=str(uuid.uuid4())
-        newurl=urllib.urlencode({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections,'download_id':download_id})
+        newurl=urllib.urlencode({'url': url, 'downloadmode': downloadmode, 'keep_file':keep_file,'connections':connections,'download_id':download_id,'name':name,'dest_folder_path':dest_folder_path})
         pm=ProxyManager()
-        print 'host name is',pm.host_name
+        print 'host name is',pm.host_name,newurl
         link = 'http://'+self.get_hostname()+(':%s/'%self.get_port()) + newurl
         return (link,download_id) #make a url that caller then call load into player
         
@@ -502,6 +553,7 @@ class ProxyManager(Singleton): #todo: make it singleton, add functions to start 
             return False
             
     def start_proxy(self,port=PORT_NUMBER, host_name=HOST_NAME,download_folder=''):
+        #todo delete the part files from the addon data directory.
         self.host_name=host_name
         self.port=port
         st = threading.Thread(target=self.start_proxy_internal, args = (download_folder,port,host_name, ))
