@@ -43,11 +43,9 @@ import sys
 
 
 
-
-
 class AxelDownloadManager(Singleton):
     def __init__(self): 
-        print 'init for AxelDownloadManager'# should happen only once
+        axelcommon.log( 'init for AxelDownloadManager')# should happen only once
         self.downloads={}
         self.currentThread=None
         self.currentThread =threading.Thread(target=self.check_forzen_downloads, args = (5,)) #give eight seconds TODO, need better handleing at streaming stop
@@ -69,7 +67,7 @@ class AxelDownloadManager(Singleton):
                         
                         if downloader.download_mode==1 and downloader.started and not downloader.keep_file:#this is streaming and file is not to be saved
                             if downloader.clients==0 and 1==2:# stop this as XBMX should tell us, todo Put sometime limit (datetime.datetime.now()-downloader.time_of_chunk).seconds>wait_time:
-                                print 'found stopped stream',downloader_name
+                                axelcommon.log( 'found stopped stream '+downloader_name)
                                 to_delete.append(downloader_name)
                         if downloader.download_mode==2 and downloader.completed: #Todo: move to history so that it could be viewed etc
                             to_delete.append(downloader_name)
@@ -86,20 +84,19 @@ class AxelDownloadManager(Singleton):
         return  self.downloads
         
     #file_link, file_dest='', file_name='',start_byte=0
-    def start_downloading(self,download_id,file_link, file_dest, file_name, start_byte,download_mode ,keep_file,connections):
+    def start_downloading(self,download_id,file_link, file_dest, file_name, start_byte,download_mode ,keep_file,connections,rtype):
         downloader=self.current_downloader(download_id)
         if downloader: #there is a download going
-                #should we throw error or reuse that? probably filename is not unique? TODO
             downloader.clients+=1;
-            print 'downloader already exists'
+            axelcommon.log( 'downloader already exists')
         else:
-            downloader = AxelDownloader(num_connections=connections,keep_file=keep_file,download_mode=download_mode) # store in the same variable
+            downloader = AxelDownloader(num_connections=connections,keep_file=keep_file,download_mode=download_mode,rtype=rtype) # store in the same variable
             dt = threading.Thread(target=downloader.download, args = (download_id,file_link, file_dest, file_name, start_byte))
-            print 'Starting downloader '
+            axelcommon.log( 'Starting downloader ')
             dt.start()
-            time.sleep(5)# todo. better handeling
+            time.sleep(10)# todo. better handeling
             #store the currentdownload
-            print 'downloader started',file_name,download_id
+            axelcommon.log( 'downloader started %s %s'%(file_name,download_id))
             self.store_downloader(download_id,downloader) #we better create a uniquekey based on url etc
 
         return downloader
@@ -120,7 +117,7 @@ class AxelDownloadManager(Singleton):
                 return False
             
         except Exception,e:
-            print 'Failed in stop_downloader  #%s :'%e 
+            axelcommon.log( 'Failed in stop_downloader  #%s :'%e) 
             return False
             
     def store_downloader(self,download_id,downloader):
@@ -128,7 +125,7 @@ class AxelDownloadManager(Singleton):
             self.downloads[download_id]=downloader
             return True
         except Exception, e:
-            print 'err  in store_downloader %s'%e
+            axelcommon.log( 'err  in store_downloader %s'%e)
             return False
             
     def current_downloader(self,download_id):
@@ -146,7 +143,7 @@ class AxelDownloader:
         - 
     '''  
 
-    def __init__(self, num_connections=2, chunk_size=1024*500, keep_file=False, download_mode=1):#2000000
+    def __init__(self, num_connections=2, chunk_size=1024*500, keep_file=False, download_mode=1,rtype=None):#2000000
         '''
         Class init      
         
@@ -168,6 +165,8 @@ class AxelDownloader:
         self.total_chunks = -1
         self.keep_file=keep_file
         self.download_mode=download_mode #1=stream, 2=download
+        self.rtype=rtype
+        self.reprioritizeThread = threading.Condition()
 
         self.http_headers = {
             'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 6.1; '
@@ -186,7 +185,7 @@ class AxelDownloader:
         self.filename =""
         axelcommon.log('Axel Downloader Intitialized')# not an xbmc but rather python downloader
 
-    def get_video_chunk(self,start_byte, timeout, chunkSize =1024):
+    def get_video_chunk(self,start_byte, timeout, chunkSize =1024*500):
 
         self.time_of_chunk=datetime.datetime.now()
         #MAX_RETURN_LENGTH=chunkSize#1024*500; #500k# TODO, get this parameterized
@@ -218,7 +217,7 @@ class AxelDownloader:
  
     def terminate(self, fromXBMCPlayer=False):
         self.stopProcessing=True
-        for t,c in self.currentThreads:
+        for t,c,p_name in self.currentThreads:
             t.terminate()
         self.cleanup(fromXBMCPlayer)
 
@@ -260,7 +259,7 @@ class AxelDownloader:
        
             return eIndex-start_byte+1;
         except Exception,e:
-            print 'Failed in stop_downloader  #%s :'%e 
+            axelcommon.log( 'Failed in get_downloaded_len_from  #%s :'%e )
             return 0
 
     def get_downloaded_data_from(self, start_byte,end_byte): #read the downloaded file,return whatever is downloaded so far starting from start_byte, could return less
@@ -286,12 +285,17 @@ class AxelDownloader:
  
     def freeze_all_threads(self, freeze):
         try:
-            for t,c in self.currentThreads:
-                if freeze:
-                    c.acquire()
-                else:
-                    c.release()
+            if self.reprioritizeThread.acquire():
+                axelcommon.log( 'freezing threads')
+                for t,c,p_name in self.currentThreads:
+                    if freeze:
+                        axelcommon.log( 'freezing thread '+p_name)
+                        c.acquire()
+                        axelcommon.log( 'Frozen thread '+p_name )
+                    else:
+                        c.release()
         except: pass
+        self.reprioritizeThread.release()
                 
     def freeze_all_but_one(self):
         self.freeze_all_threads();
@@ -299,50 +303,63 @@ class AxelDownloader:
         c.release();
                 
     def repriotize_queue(self,  startingByte):# shuffle the queue and start downloading what xbmc wants, due to seek may be?
-        print 'stop everyone, repriotize_queue',startingByte
+    
+    
+        axelcommon.log( 'stop everyone, repriotize_queue %d'%startingByte)
         self.stopEveryone=True
-        print 'wait for the condition'
+        axelcommon.log( 'wait for the condition')
 
         #self.isAllowed.acquire();#freeze everyone
         #time.sleep(2); #give time so everyone are frozen
         self.freeze_all_threads(True)
-        print 'thread frozen'
+        axelcommon.log( 'thread frozen' )
         self.saveFileLock.acquire(); #try again
+        axelcommon.log( 'saveFileLock.acquire()')
         self.isAllowed.acquire();
-        print 'save frozen'
-        downloadBytes=self.get_downloaded_len_from(startingByte,startingByte+10); #just check again
+        axelcommon.log( 'save frozen')
+        #downloadBytes=self.get_downloaded_len_from(startingByte,startingByte+2); #just check again
         
-        if not downloadBytes==0: 
-             self.isAllowed.release()
-             self.freeze_all_threads(False)
-             self.saveFileLock.release();
-             return #transient situation
-        print 'ok start looking into'
+        if self.is_chunk_downloaded(startingByte):#not downloadBytes==0: #perhaps it was just downloaded
+            self.stopEveryone=False
+            self.isAllowed.release()
+            self.freeze_all_threads(False)
+            self.saveFileLock.release(); 
+            self.reprioritizeThread.release()
+            return #transient situation
+        axelcommon.log( 'ok start looking into')
         currentQueue=[];
         while (not self.workQ.empty()):  #clear the queue
             currentQueue.append(self.workQ.get())
-        print 'left over',currentQueue
+        axelcommon.log( 'left over %s'%currentQueue)
         currentQueue.sort(key=lambda x: x[2]);# sort on start number as we could be in any sequence due to seek,,front to back and so on
         sIndex=-1
         for i, item in enumerate(currentQueue):
             if startingByte>=item[2] and startingByte<=(item[2]+item[3]-1):
                 sIndex= i
                 break;
-        print 'sIndex starting point',sIndex
-        if not sIndex==-1: #error here !
-            newQueue=[]
+        axelcommon.log( 'sIndex starting point %d,%d,%s'%(sIndex,startingByte,currentQueue))
+        #if not sIndex==-1: #error here !
+        newQueue=[]
+        if not sIndex==-1:
             for i in range(0,len(currentQueue)):
                 currentQueue[sIndex][0]=i; #new priority
                 newQueue.append(currentQueue[sIndex])
                 sIndex+=1;
                 if sIndex>len(currentQueue)-1: sIndex=0;#if reached end then start from beginning
-            print 'newQueue',newQueue
-            for i, item in enumerate(newQueue):
-                self.workQ.put(item)# recreate new queue in different order
+        else: #if no need to requeue then use existing one
+            newQueue=currentQueue
+            
+        axelcommon.log( 'repiority %s,%s'%(newQueue,self.completedWork),2)
+        for i, item in enumerate(newQueue):
+            self.workQ.put(item)# recreate new queue in different order
+        
+            
         self.stopEveryone=False
         self.freeze_all_threads(False)
         self.saveFileLock.release();
         self.isAllowed.release(); #start downloading again but in different priority
+
+            
         
 
     #def stop()
@@ -364,7 +381,7 @@ class AxelDownloader:
             content_length = data.info()['Content-Length']
         except urllib2.URLError, e:
             #axelcommon.log_error('http connection error attempting to retreive file size: %s' % str(e))
-            print 'http connection error attempting to retreive file size: %s' % str(e)
+            axelcommon.log( 'http connection error attempting to retreive file size: %s' % str(e))
             return False
   
         return content_length
@@ -383,17 +400,20 @@ class AxelDownloader:
             try:
                 if self.stopProcessing: return
                 self.saveFileLock.acquire()
+                #print 'writing aquired'
                 #Grab items from queue to process
                 try:
                     block_num=-1
                     block_num, start_block,length, chunk_block = self.resultQ.get(block=False,timeout=1)  
                 except Exception, e:
                     self.saveFileLock.release()
+                    time.sleep(2);#sleep 2 seconds if there is nothing to sve
                     continue
                 
-                #print 'trying to get the first chunk'
+
 
                 #Write downloaded blocks to file
+                #print 'writing log %d'%block_num
                 axelcommon.log('Writing block #%d starting byte: %d size: %d' % (block_num, start_block, len(chunk_block)), 2)
                 
                 out_fd = open(out_file, "r+b")      
@@ -404,10 +424,13 @@ class AxelDownloader:
                 #Tell queue that this task is done
                 self.resultQ.task_done()
                 self.completedWork.append ([block_num, start_block,length])
+                axelcommon.log( 'appened ')
 
 
             except Exception, e:
-              
+                axelcommon.log( 'failed!')
+                traceback.print_exc(file=sys.stdout)
+
                 axelcommon.log('Failed writing block #%d %s :'  % (block_num, e))        
                 
                 #Put chunk back into queue, mark this one done
@@ -472,7 +495,7 @@ class AxelDownloader:
             file_name (str): name of saved file - name will be pulled from file_link if not supplied
         ''' 
 
-        axelcommon.log('In Download ...', 2)
+        axelcommon.log('In Pre Download ...', 2)
         self.file_link=file_link
         if not file_dest:
             file_dest = axelcommon.profile_path
@@ -495,14 +518,15 @@ class AxelDownloader:
         self.isAllowed.acquire();
         self.__build_workq(file_link) 
         
-        
+        axelcommon.log('In Download ...', 2)
         # Ccreate a worker thread pool
         for i in range(self.num_conn):
             keepProcessing = threading.Condition()
             t = DownloadQueueProcessor()
-            t.setKeepProcessing(keepProcessing)
+            proc_name='thread#'+str(i)
+            t.setKeepProcessing(keepProcessing,proc_name)
             t.caller = self
-            self.currentThreads.append([t,keepProcessing])
+            self.currentThreads.append([t,keepProcessing,proc_name])
             t.start()
         axelcommon.log('Worker threads initialized', 2)
         
@@ -534,25 +558,25 @@ class AxelDownloader:
                 break;
         
         if not self.stopProcessing:
-            print 'now final join'
+            axelcommon.log( 'now final join')
             #self.workQ.join()#timeout# This freezes, since we are here and everything has been processed ..
-            print 'resultQ', self.resultQ.unfinished_tasks
+            axelcommon.log( 'resultQ %s'% self.resultQ.unfinished_tasks)
             axelcommon.log('Worker Queue successfully joined', 2)
             if self.resultQ.unfinished_tasks:
-                print 'there are still some unfinsihed tasks??'
+                axelcommon.log( 'there are still some unfinsihed tasks??')
                 time.sleep(6)#give time to results to finish.
             if not self.resultQ.unfinished_tasks:
                 self.resultQ.join()
                 axelcommon.log('Result Queue successfully joined', 2)
             else:
-                print 'something wrong, tasks are finished but results are not in,ignoring'
+                axelcommon.log( 'something wrong, tasks are finished but results are not in,ignoring')
             self.completed=True
-            print 'terminating'
+            axelcommon.log( 'terminating')
             self.terminate()
-            print 'DOWNLOAD COMPLETED'
+            axelcommon.log( 'DOWNLOAD COMPLETED')
         else:
-            print 'Ternimated... by user'
-        print 'THE END'
+            axelcommon.log( 'Ternimated... by user')
+        axelcommon.log( 'THE END')
         self.terminated=True
         #if self.download_mode==1 and not self.keep_file: # if file not to be saved
         #    os.remove(out_file)
@@ -606,12 +630,14 @@ class DownloadQueueProcessor(threading.Thread):
         self.stopProcessing=False
         self.keepProcessing=None
         self.caller=None
+        self.name='##'
 
     def terminate(self):
         self.stopProcessing=True
 
-    def setKeepProcessing(self,C):
+    def setKeepProcessing(self,C,proc_name):
         self.keepProcessing=C
+        self.name=proc_name
 
 
     def run(self):
@@ -621,6 +647,10 @@ class DownloadQueueProcessor(threading.Thread):
 
         while True:
             if self.stopProcessing: return
+            if self.caller.stopEveryone:
+                #print 'sleeping thread due to stopEveryone '+self.name
+                time.sleep(1)
+                #continue
             self.keepProcessing.acquire()
             #self.caller.isAllowed.acquire();
             try:
@@ -633,20 +663,24 @@ class DownloadQueueProcessor(threading.Thread):
             
             if not self.caller.workQ.unfinished_tasks:
                 #self.keepProcessing.release()
-                print 'end of thread................'
+                axelcommon.log( 'end of thread................')
                 return
             #axelcommon.log('Starting Worker Queue #: %d starting: %d length: %d' % (block_num, start, length), 2)
 
             if block_num==-1:
+                axelcommon.log( 'sleeping thread %s'%self.name)
                 time.sleep(1)
                 continue 
             #Download the file
+            axelcommon.log( 'found something to process %s'%self.name )
             start_time = time.time()
             result,chunkData = self.__download_file(block_num, url, start, length)
+            axelcommon.log( 'got the data %s'%self.name )
             elapsed_time = time.time() - start_time
             #print 'time take ',elapsed_time
             #Check result status            
             if result == True:
+                axelcommon.log( ' data is ok %s'%self.name )
                 #Tell queue that this task is done
                 #axelcommon.log('Worker Queue #: %d downloading finished' % block_num, 2)
                 
@@ -664,7 +698,7 @@ class DownloadQueueProcessor(threading.Thread):
 
             #503 - Likely too many connection attempts
             elif result == "503":
-
+                axelcommon.log( ' data is 503 %s'%self.name )
                 axelcommon.log('503 error - Breaking from loop, closing thread - Queue #: %d' % block_num, 0)
                 
                 #isAllowed.acquire();
@@ -674,9 +708,11 @@ class DownloadQueueProcessor(threading.Thread):
                 #Put chunk back into workQ then break from loop/end thread
                 self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
-                break
+                #break# service unavailable, means dont mess with multiple thread
+                #keep going :)
 
             else:
+                axelcommon.log( ' data is not ok %s'%self.name )
                 #Mark queue task as done
                 #isAllowed.acquire();
                 self.caller.workQ.task_done()
@@ -685,6 +721,7 @@ class DownloadQueueProcessor(threading.Thread):
                 axelcommon.log('Re-adding block back into Queue - Queue #: %d' % block_num, 0)
                 self.caller.workQ.put([block_num, url, start, length])
                 #isAllowed.release();
+            axelcommon.log( 'Before finishing download process %s'%self.name )
             self.keepProcessing.release()
 
  
