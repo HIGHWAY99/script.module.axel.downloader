@@ -17,3 +17,4 @@
 '''
 
 import axelcommon
+axelcommon.log('Initializing AxelProxy version: %s' % axelcommon.addon_version)
