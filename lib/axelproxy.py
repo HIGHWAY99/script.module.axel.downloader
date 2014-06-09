@@ -243,9 +243,14 @@ class MyHandler(BaseHTTPRequestHandler):
         if not dest_folder_path=='':
             file_dest=dest_folder_path
         rtype="video/mp4" #just as default
+        import axel
+        downloadManager = axel.AxelDownloadManager() #singleton
+        existing_download=downloadManager.current_downloader(download_id)
+        if existing_download==None:
+            file_size,file_url,rtype=self.get_file_size(file_url)# TODO: get the url again, incase there is a redirector
+        else:
+            file_size,file_url,rtype= existing_download.fileLen,file_url, existing_download.rtype
 
-
-        file_size,file_url,rtype=self.get_file_size(file_url)# TODO: get the url again, incase there is a redirector
         file_size=int(file_size)
         print 'file size',file_size
         (srange, erange) = self.get_range_request(s_range, file_size)
@@ -261,9 +266,7 @@ class MyHandler(BaseHTTPRequestHandler):
         print 'download_mode',download_mode
         if str(download_mode)==2: #if its download only then do not stream
             print 'got download request'
-            import axel
-            downloadManager = axel.AxelDownloadManager() #singleton
-            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, 0,download_mode ,True,connections) #either create downloader or return exiting one
+            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, 0,download_mode ,True,connections,rtype) #either create downloader or return exiting one
             print 'download started'
             self.sendHTML('Download Started')
             return
@@ -273,9 +276,7 @@ class MyHandler(BaseHTTPRequestHandler):
             crange="bytes "+str(srange)+"-" +str(int(content_size-1))+"/"+str(content_size)#recalculate crange based on srange, portionLen and content_size 
             self.send_header("Content-Range",crange)
             self.send_http_headers(file_name, rtype, content_size , etag)
-            import axel
-            downloadManager = axel.AxelDownloadManager() #singleton
-            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, srange,download_mode ,keep_file,connections) #either create downloader or return exiting one
+            downloader = downloadManager.start_downloading(download_id,file_url, file_dest, file_name, srange,download_mode ,keep_file,connections,rtype) #either create downloader or return exiting one
 
             self.keep_sending_video(self.wfile,downloader,srange) #TODO create a streamer class and let it do the job #start sending video, this will never terminate, unless we are done sending
             downloader.clients-=1
