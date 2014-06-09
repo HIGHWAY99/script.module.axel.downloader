@@ -18,7 +18,6 @@
 #todo remove them from here
 import os   
 import sys 
-#from t0mm0.common.addon import Addon
 
 addon = None#Addon('script.module.axel.downloader')
 profile_path =None# addon.get_profile()
@@ -34,21 +33,19 @@ def module_path():
     return os.path.dirname(unicode(__file__, encoding))
 
 try:
-    import xbmc, xbmcaddon
     addon_id = 'script.module.axel.downloader'
-    addon = xbmcaddon.Addon(id=addon_id)
-    profile_path =  xbmc.translatePath(addon.getAddonInfo('profile'))
-    #from t0mm0.common.addon import Addon
-    #addon = Addon('script.module.axel.downloader')
-    #addon_path = addon.get_path()
-    #profile_path = addon.get_profile()
+    from addon.common.addon import Addon
+    addon = Addon('script.module.axel.downloader')
+    addon_path = addon.get_path()
+    profile_path = addon.get_profile()
+    addon_version = addon.get_version()
 except:
     profile_path=module_path()
 
 def log(msg,n=0):
     if addon:
-        #addon.log(msg,n)
-        xbmc.log('%s: %s' % (addon_id, msg), n)
+        addon.log(msg,n)
+        #xbmc.log('%s: %s' % (addon_id, msg), n)
     else:
         print msg
     
