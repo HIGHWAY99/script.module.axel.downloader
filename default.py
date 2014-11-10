@@ -19,8 +19,8 @@
 '''
 
 
-import lib.axelcommon
-import lib.axelproxy
+from lib import axelcommon
+from lib import axelproxy
 # This is xbmc  class. TODO: read the settings here and send it to proxy for port etc
 #TODO: check if start at launch setting is configured!
 #todo find a better way to pass port and host and make it persist as Singleton is not working in xbmc
