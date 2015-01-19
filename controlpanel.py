@@ -140,7 +140,7 @@ class MyClass(xbmcgui.Window):
           ##Percent: Red Bar.
           self.PercBarA[itemNo-1].setVisible(True)
           ##Percent: Green Bar.
-          iPercWidth=self.itemW/iTotalChunks*iTotalChunksCompleted
+          iPercWidth=int(self.itemW*iTotalChunksCompleted/iTotalChunks)
           #iPercent=str(iTotalChunksCompleted/iTotalChunks*100)+'%' #Ended up as ZERO always.
           iPercent=str(int(iTotalChunksCompleted*100/iTotalChunks))+'%' #Fixed.
           self.PercBarB[itemNo-1].setWidth(iPercWidth)
