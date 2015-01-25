@@ -465,7 +465,7 @@ class ProxyHelper():
         self.play_in_XBMC(finalUrl,name,download_id,keep_file)
 
     def download(self,url,name='',connections=2,dest_path=''):
-        finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True,name=name,dest_folder_path=dest_folder_path)
+        finalUrl,download_id = self.create_proxy_url(url,connections=connections,downloadmode=2,keep_file=True,name=name,dest_folder_path=dest_path)
         self.call_page(finalUrl)
         return download_id
         
